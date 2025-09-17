@@ -24,17 +24,17 @@ std::string ReadFile(const std::filesystem::path& shader_path) {
 }
 
 int main (int argc, char *argv[]) {
+    std::filesystem::current_path(std::filesystem::path(argv[0]).parent_path().parent_path());
     glfwInit();
     int width {800};
     int height {600};
     GLFWwindow *window = lvk::initWindow("VKEngine", width, height, false);
     std::unique_ptr<lvk::IContext> ctx = lvk::createVulkanContextWithSwapchain(window, width, height, {});
     lvk::Result res;
-    const char * vert_content = ReadFile("shaders/basic.vert").c_str();
-    lvk::Holder<lvk::ShaderModuleHandle> vert = ctx->createShaderModule(lvk::ShaderModuleDesc{(vert_content), lvk::Stage_Vert, ("vert shader")}, &res);
-    if(!res.isOk()) {
-        std::cout << "vert failed" << std::endl;
-    }
+    lvk::Holder<lvk::ShaderModuleHandle> vert = ctx->createShaderModule(lvk::ShaderModuleDesc{(ReadFile("shaders/basic.vert").c_str()), lvk::Stage_Vert, ("vert shader")}, &res);
+    //if(!res.isOk()) {
+    //    std::cout << "vert failed" << std::endl;
+    //}
     lvk::Holder<lvk::ShaderModuleHandle> frag = ctx->createShaderModule(lvk::ShaderModuleDesc{(ReadFile("shaders/basic.frag").c_str()), lvk::Stage_Frag, ("frag shader")}, nullptr);
     lvk::Holder<lvk::RenderPipelineHandle> pipeline = ctx->createRenderPipeline({.smVert = vert, .smFrag = frag, .color = {{.format = ctx->getSwapchainFormat()}}});
     while (!glfwWindowShouldClose(window)) {
