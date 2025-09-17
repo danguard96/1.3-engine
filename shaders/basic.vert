@@ -1,23 +1,20 @@
-#version 450
+#version 460
 
-layout(location = 0) in vec3 inPosition;
-layout(location = 1) in vec3 inNormal;
-layout(location = 2) in vec2 inTexCoord;
+layout (location=0) out vec3 color;
 
-layout(location = 0) out vec3 fragPos;
-layout(location = 1) out vec3 fragNormal;
-layout(location = 2) out vec2 fragTexCoord;
+const vec2 pos[3] = vec2[3](
+vec2(-0.6, -0.4),
+vec2( 0.6, -0.4),
+vec2( 0.0,  0.6)
+);
 
-layout(push_constant) uniform PushConstants {
-    mat4 model;
-    mat4 view;
-    mat4 projection;
-} pc;
+const vec3 col[3] = vec3[3](
+vec3(1.0, 0.0, 0.0),
+vec3(0.0, 1.0, 0.0),
+vec3(0.0, 0.0, 1.0)
+);
 
 void main() {
-    fragPos = vec3(pc.model * vec4(inPosition, 1.0));
-    fragNormal = mat3(transpose(inverse(pc.model))) * inNormal;
-    fragTexCoord = inTexCoord;
-    
-    gl_Position = pc.projection * pc.view * vec4(fragPos, 1.0);
+    gl_Position = vec4(pos[gl_VertexIndex], 0.0, 1.0);
+    color = col[gl_VertexIndex];
 }
