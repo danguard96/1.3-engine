@@ -15,13 +15,14 @@ include_directories(external)
 
 # Add subdirectories for bootstrapped libraries
 add_subdirectory(deps/src/glm)
-add_subdirectory(deps/src/glfw)
+#add_subdirectory(deps/src/glfw)
 add_subdirectory(deps/src/spdlog)
 add_subdirectory(deps/src/yaml-cpp)
 
 # LightweightVK setup
 set(LIGHTWEIGHTVK_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/src/lightweightvk)
 include_directories(${LIGHTWEIGHTVK_SOURCE_DIR}/include)
+add_subdirectory(${LIGHTWEIGHTVK_SOURCE_DIR})
 
 # ImGui setup
 set(IMGUI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/src/imgui)
@@ -53,6 +54,7 @@ target_link_libraries(VulkanEngine PRIVATE
     Vulkan::Vulkan 
     spdlog::spdlog 
     yaml-cpp
+    lvk
 )
 
 # Compile definitions
@@ -77,6 +79,9 @@ target_compile_features(VulkanEngine PRIVATE cxx_std_20)
 
 # Precompiled headers
 #target_precompile_headers(VulkanEngine PRIVATE "src/precomp.h")
+
+set(LVK_WITH_GLFW ON CACHE BOOL "Enable GLFW window support")
+target_compile_definitions(VulkanEngine PUBLIC LVK_WITH_GLFW=1)
 
 # Shader compilation
 include(cmake/Shaders.cmake)
