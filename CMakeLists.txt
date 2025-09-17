@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.30)
+cmake_minimum_required(VERSION 3.19)
 
 project(VulkanEngine VERSION 1.3.0 LANGUAGES CXX)
 
@@ -13,48 +13,42 @@ include_directories(deps)
 include_directories(deps/src)
 include_directories(external)
 
+# Remove ImGui from our deps since LightweightVK provides it
+set(CMAKE_DISABLE_FIND_PACKAGE_ImGui TRUE)
+
 # Add subdirectories for bootstrapped libraries
 add_subdirectory(deps/src/glm)
-#add_subdirectory(deps/src/glfw)
 add_subdirectory(deps/src/spdlog)
 add_subdirectory(deps/src/yaml-cpp)
 
 # LightweightVK setup
 set(LIGHTWEIGHTVK_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/src/lightweightvk)
 include_directories(${LIGHTWEIGHTVK_SOURCE_DIR}/include)
+
+# Disable Tracy to avoid build issues
+set(LVK_WITH_TRACY OFF CACHE BOOL "Disable Tracy profiler")
+set(LVK_WITH_TRACY_GPU OFF CACHE BOOL "Disable Tracy GPU profiler")
+
 add_subdirectory(${LIGHTWEIGHTVK_SOURCE_DIR})
-
-# ImGui setup
-set(IMGUI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/src/imgui)
-set(IMGUI_BACKENDS_DIR ${IMGUI_SOURCE_DIR}/backends)
-
-set(IMGUI_CORE_SOURCES
-    ${IMGUI_SOURCE_DIR}/imgui.cpp
-    ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
-    ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
-    ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
-)
 
 # Main engine sources
 file(GLOB_RECURSE EngineSources CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
-    "${IMGUI_BACKENDS_DIR}/imgui_impl_glfw.cpp"
-    "${IMGUI_BACKENDS_DIR}/imgui_impl_vulkan.cpp"
 )
 
 # Create the main executable
-add_executable(VulkanEngine ${EngineSources} ${IMGUI_CORE_SOURCES}
-        src/main.cpp)
+add_executable(VulkanEngine ${EngineSources} src/main.cpp)
 
 # Link libraries
 target_link_libraries(VulkanEngine PRIVATE 
-    glm 
+    glm::glm
     glfw 
     Vulkan::Vulkan 
     spdlog::spdlog 
     yaml-cpp
-    lvk
+    LVKLibrary
+    minilog
 )
 
 # Compile definitions
@@ -63,14 +57,15 @@ target_compile_definitions(VulkanEngine PRIVATE
     STB_IMAGE_IMPLEMENTATION
 )
 
+# Use LightweightVK's ImGui instead of our own to avoid version conflicts
+
 # Include directories
 target_include_directories(VulkanEngine PRIVATE 
     "src"
-    ${IMGUI_SOURCE_DIR}
-    ${IMGUI_BACKENDS_DIR}
     "deps/src/tiny_obj_loader"
     "deps/src/stb"
     "deps/src/yaml-cpp/include"
+    "deps/src/minilog"
     ${LIGHTWEIGHTVK_SOURCE_DIR}/include
 )
 

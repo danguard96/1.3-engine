@@ -15,7 +15,8 @@ int main (int argc, char *argv[]) {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
     }
+    ctx.release();
     glfwDestroyWindow(window);
     glfwTerminate();
-    std::cout << "Hello World!\n";
+    return 0;
 }
