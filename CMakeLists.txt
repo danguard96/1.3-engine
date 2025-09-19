@@ -20,6 +20,7 @@ set(CMAKE_DISABLE_FIND_PACKAGE_ImGui TRUE)
 add_subdirectory(deps/src/glm)
 add_subdirectory(deps/src/spdlog)
 add_subdirectory(deps/src/yaml-cpp)
+add_subdirectory(deps/src/fastgltf)
 
 # LightweightVK setup
 set(LIGHTWEIGHTVK_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/src/lightweightvk)
