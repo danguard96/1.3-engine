@@ -49,6 +49,7 @@ target_link_libraries(VulkanEngine PRIVATE
     yaml-cpp
     LVKLibrary
     minilog
+    fastgltf
 )
 
 # Compile definitions
@@ -64,6 +65,7 @@ target_include_directories(VulkanEngine PRIVATE
     "src"
     "deps/src/tiny_obj_loader"
     "deps/src/stb"
+    "deps/src/fastgltf/include"
     "deps/src/yaml-cpp/include"
     "deps/src/minilog"
     ${LIGHTWEIGHTVK_SOURCE_DIR}/include

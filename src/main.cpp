@@ -8,8 +8,7 @@
 #include <lightweightvk/lvk/LVK.h>
 #include <fstream>
 #include <sstream>
-
-#include "ktx-software/lib/vkformat_enum.h"
+#include <fastgltf/core.hpp>
 
 std::string ReadFile(const std::filesystem::path &shader_path) {
     if (!exists(shader_path) || !is_regular_file(shader_path)) return {};
@@ -23,6 +22,12 @@ std::string ReadFile(const std::filesystem::path &shader_path) {
 }
 
 int main(int argc, char *argv[]) {
+
+    fastgltf::Parser parser;
+    std::filesystem::path path = "assets/old_rusty_car/scene.bin";
+    auto data = fastgltf::GltfDataBuffer::FromPath(path);
+    auto asset = parser.loadGltf(data.get(), path.parent_path(), fastgltf::Options::None);
+
     glfwInit();
     int width{800};
     int height{600};
@@ -46,6 +51,7 @@ int main(int argc, char *argv[]) {
                                          {.color = {{.texture = ctx->getCurrentSwapchainTexture()}}});
         command_buffer.cmdBindRenderPipeline(pipeline);
         command_buffer.cmdDraw(3);
+
         command_buffer.cmdEndRendering();
         ctx->submit(command_buffer, ctx->getCurrentSwapchainTexture());
     }
