@@ -20,7 +20,6 @@ set(CMAKE_DISABLE_FIND_PACKAGE_ImGui TRUE)
 add_subdirectory(deps/src/glm)
 add_subdirectory(deps/src/spdlog)
 add_subdirectory(deps/src/yaml-cpp)
-add_subdirectory(deps/src/fastgltf)
 
 # LightweightVK setup
 set(LIGHTWEIGHTVK_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/src/lightweightvk)
@@ -50,13 +49,13 @@ target_link_libraries(VulkanEngine PRIVATE
     yaml-cpp
     LVKLibrary
     minilog
-    fastgltf
 )
 
 # Compile definitions
 target_compile_definitions(VulkanEngine PRIVATE 
     TINYOBJLOADER_IMPLEMENTATION
     STB_IMAGE_IMPLEMENTATION
+    CGLTF_IMPLEMENTATION
 )
 
 # Use LightweightVK's ImGui instead of our own to avoid version conflicts
@@ -66,7 +65,7 @@ target_include_directories(VulkanEngine PRIVATE
     "src"
     "deps/src/tiny_obj_loader"
     "deps/src/stb"
-    "deps/src/fastgltf/include"
+    "deps/src/cgltf"
     "deps/src/yaml-cpp/include"
     "deps/src/minilog"
     ${LIGHTWEIGHTVK_SOURCE_DIR}/include
