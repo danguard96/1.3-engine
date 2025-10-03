@@ -13,7 +13,10 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
-#include <cgltf.h>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+#include <assimp/cimport.h>
+#include <assimp/version.h>
 #include "Camera.h"
 #include <stb_image.h>
 
@@ -28,20 +31,26 @@ std::string ReadFile(const std::filesystem::path &shader_path) {
     return buffer.str();
 }
 
-// Helper: read entire glTF file
-cgltf_data* LoadGLTF(const char* path) {
-    cgltf_options options{};
-    cgltf_data* data = nullptr;
-    if (cgltf_parse_file(&options, path, &data) != cgltf_result_success) {
-        std::cerr << "Failed to parse glTF: " << path << "\n";
+// Helper: Load FBX model using assimp
+const aiScene* LoadFBX(const char* path) {
+    const aiScene* scene = aiImportFile(path, 
+        aiProcess_Triangulate | 
+        aiProcess_FlipUVs | 
+        aiProcess_GenNormals |
+        aiProcess_CalcTangentSpace);
+    
+    if (!scene) {
+        std::cerr << "Failed to load FBX: " << path << "\n";
         return nullptr;
     }
-    if (cgltf_load_buffers(&options, data, path) != cgltf_result_success) {
-        std::cerr << "Failed to load buffers\n";
-        cgltf_free(data);
+    
+    if (!scene->HasMeshes()) {
+        std::cerr << "No meshes found in FBX file: " << path << "\n";
+        aiReleaseImport(scene);
         return nullptr;
     }
-    return data;
+    
+    return scene;
 }
 
 // Helper: Load texture from file
@@ -70,6 +79,7 @@ lvk::Holder<lvk::TextureHandle> LoadTexture(lvk::IContext* ctx, const char* path
 struct Vertex {
     glm::vec3 position;
     glm::vec2 texCoord;
+    glm::vec3 normal;
 };
 
 struct MeshBuffers {
@@ -85,72 +95,71 @@ struct MeshBuffers {
     MeshBuffers& operator=(MeshBuffers&&) = default;
 };
 
-MeshBuffers UploadMesh(lvk::IContext* ctx, cgltf_primitive* prim) {
+MeshBuffers UploadMesh(lvk::IContext* ctx, const aiMesh* mesh) {
     MeshBuffers out{};
 
-    // --- Gather positions and texture coordinates
-    cgltf_accessor* posAcc = nullptr;
-    cgltf_accessor* texAcc = nullptr;
-    cgltf_accessor* idxAcc = prim->indices;
-
-    for (size_t i = 0; i < prim->attributes_count; ++i) {
-        if (prim->attributes[i].type == cgltf_attribute_type_position) {
-            posAcc = prim->attributes[i].data;
-        } else if (prim->attributes[i].type == cgltf_attribute_type_texcoord) {
-            texAcc = prim->attributes[i].data;
-        }
+    if (!mesh->HasPositions()) {
+        throw std::runtime_error("Mesh has no positions");
     }
 
-    if (!posAcc || !idxAcc) {
-        throw std::runtime_error("Mesh has no positions or indices");
-    }
+    size_t vertexCount = mesh->mNumVertices;
+    size_t indexCount = mesh->mNumFaces * 3; // Triangulated
+    out.indexCount = static_cast<uint32_t>(indexCount);
 
-    size_t vertexCount = posAcc->count;
-    size_t indexCount  = idxAcc->count;
-    out.indexCount     = static_cast<uint32_t>(indexCount);
-
-    // Extract positions
-    std::vector<float> positions(vertexCount * 3);
-    cgltf_accessor_unpack_floats(posAcc, positions.data(), positions.size());
-
-    // Extract texture coordinates (use default if not available)
-    std::vector<float> texCoords(vertexCount * 2);
-    if (texAcc) {
-        cgltf_accessor_unpack_floats(texAcc, texCoords.data(), texCoords.size());
-    } else {
-        // Default texture coordinates if not available
-        for (size_t i = 0; i < vertexCount; ++i) {
-            texCoords[i * 2] = 0.0f;
-            texCoords[i * 2 + 1] = 0.0f;
-        }
-    }
-
-    // Create vertex data with position and texture coordinates
+    // Create vertex data with position, texture coordinates, and normals
     std::vector<Vertex> vertices(vertexCount);
     for (size_t i = 0; i < vertexCount; ++i) {
-        vertices[i].position = glm::vec3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
-        vertices[i].texCoord = glm::vec2(texCoords[i * 2], texCoords[i * 2 + 1]);
+        vertices[i].position = glm::vec3(
+            mesh->mVertices[i].x, 
+            mesh->mVertices[i].y, 
+            mesh->mVertices[i].z
+        );
+        
+        // Texture coordinates (use first UV channel if available)
+        if (mesh->HasTextureCoords(0)) {
+            vertices[i].texCoord = glm::vec2(
+                mesh->mTextureCoords[0][i].x,
+                mesh->mTextureCoords[0][i].y
+            );
+        } else {
+            vertices[i].texCoord = glm::vec2(0.0f, 0.0f);
+        }
+        
+        // Normals
+        if (mesh->HasNormals()) {
+            vertices[i].normal = glm::vec3(
+                mesh->mNormals[i].x,
+                mesh->mNormals[i].y,
+                mesh->mNormals[i].z
+            );
+        } else {
+            vertices[i].normal = glm::vec3(0.0f, 1.0f, 0.0f);
+        }
     }
 
+    // Extract indices
     std::vector<uint32_t> indices(indexCount);
-    for (size_t i = 0; i < indexCount; ++i) {
-        indices[i] = static_cast<uint32_t>(cgltf_accessor_read_index(idxAcc, i));
+    size_t idx = 0;
+    for (size_t i = 0; i < mesh->mNumFaces; ++i) {
+        const aiFace& face = mesh->mFaces[i];
+        for (size_t j = 0; j < face.mNumIndices; ++j) {
+            indices[idx++] = face.mIndices[j];
+        }
     }
     
-    // Debug: Print first few vertices to see what we're actually getting
+    // Debug: Print first few vertices
     std::cout << "Mesh vertices: ";
     for (int i = 0; i < 3 && i < vertexCount; ++i) {
-        std::cout << "(" << positions[i*3] << ", " << positions[i*3+1] << ", " << positions[i*3+2] << ") ";
+        std::cout << "(" << vertices[i].position.x << ", " << vertices[i].position.y << ", " << vertices[i].position.z << ") ";
     }
     std::cout << std::endl;
-    
 
     // --- Upload via LightweightVK
     {
         lvk::BufferDesc vdesc{};
         vdesc.size = vertices.size() * sizeof(Vertex);
         vdesc.usage = lvk::BufferUsageBits_Vertex;
-        vdesc.storage = lvk::StorageType_HostVisible;
+        vdesc.storage = lvk::StorageType_Device;
 
         out.vertexBuffer = ctx->createBuffer(vdesc, "vertex_buffer");
         
@@ -162,7 +171,7 @@ MeshBuffers UploadMesh(lvk::IContext* ctx, cgltf_primitive* prim) {
         lvk::BufferDesc idesc{};
         idesc.size = indices.size() * sizeof(uint32_t);
         idesc.usage = lvk::BufferUsageBits_Index;
-        idesc.storage = lvk::StorageType_HostVisible;
+        idesc.storage = lvk::StorageType_Device;
 
         out.indexBuffer = ctx->createBuffer(idesc, "index_buffer");
         
@@ -191,37 +200,33 @@ int main(int argc, char *argv[]) {
     camera.Perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
     camera.LookAt(camPos, camTarget, camUp);
     
-    // Load glTF asset
-    cgltf_data* gltf = LoadGLTF("assets/old_rusty_car/scene.gltf");
-    if (!gltf) return -1;
+    // Load FBX asset
+    const aiScene* scene = LoadFBX("assets/skull/source/skull.fbx");
+    if (!scene) return -1;
     
-    // Load all textures from the glTF file
-    auto texture0 = LoadTexture(ctx.get(), "assets/old_rusty_car/textures/Material_294_baseColor.png");        // Material_294 baseColor
-    auto texture1 = LoadTexture(ctx.get(), "assets/old_rusty_car/textures/Material_294_metallicRoughness.png"); // Material_294 metallicRoughness  
-    auto texture2 = LoadTexture(ctx.get(), "assets/old_rusty_car/textures/Material_294_normal.png");          // Material_294 normal
-    auto texture3 = LoadTexture(ctx.get(), "assets/old_rusty_car/textures/Material_295_baseColor.png");        // Material_295 baseColor
-    auto texture4 = LoadTexture(ctx.get(), "assets/old_rusty_car/textures/Material_316_baseColor.png");        // Material_316 baseColor
+    // Load textures for the skull model
+    auto texture0 = LoadTexture(ctx.get(), "assets/skull/textures/skullColor.png");
+    auto texture1 = LoadTexture(ctx.get(), "assets/skull/textures/skullNormal.png");
+    auto texture2 = LoadTexture(ctx.get(), "assets/skull/textures/skullRoughness.png");
     
     std::cout << "Loaded all textures successfully" << std::endl;
 
     std::vector<MeshBuffers> meshes;
-    for (size_t mi = 0; mi < gltf->meshes_count; ++mi) {
-        for (size_t pi = 0; pi < gltf->meshes[mi].primitives_count; ++pi) {
-            try {
-                MeshBuffers mesh = UploadMesh(ctx.get(), &gltf->meshes[mi].primitives[pi]);
-                meshes.push_back(std::move(mesh));
-                std::cout << "Uploaded mesh: " << meshes.back().indexCount << " indices\n";
-            } catch (const std::exception& e) {
-                std::cerr << "Failed to upload mesh: " << e.what() << std::endl;
-            }
+    for (size_t mi = 0; mi < scene->mNumMeshes; ++mi) {
+        try {
+            MeshBuffers mesh = UploadMesh(ctx.get(), scene->mMeshes[mi]);
+            meshes.push_back(std::move(mesh));
+            std::cout << "Uploaded mesh " << mi << ": " << meshes.back().indexCount << " indices\n";
+        } catch (const std::exception& e) {
+            std::cerr << "Failed to upload mesh " << mi << ": " << e.what() << std::endl;
         }
     }
 
     // Create shaders
     const lvk::Holder<lvk::ShaderModuleHandle> vert = ctx->createShaderModule(
-        lvk::ShaderModuleDesc{(ReadFile("shaders/basic.vert").c_str()), lvk::Stage_Vert, ("vert shader")}, nullptr);
+        lvk::ShaderModuleDesc{(ReadFile("shaders/blinn_phong.vert").c_str()), lvk::Stage_Vert, ("vert shader")}, nullptr);
     const lvk::Holder<lvk::ShaderModuleHandle> frag = ctx->createShaderModule(
-        lvk::ShaderModuleDesc{(ReadFile("shaders/basic.frag").c_str()), lvk::Stage_Frag, ("frag shader")}, nullptr);
+        lvk::ShaderModuleDesc{(ReadFile("shaders/blinn_phong.frag").c_str()), lvk::Stage_Frag, ("frag shader")}, nullptr);
     
     // Create pipeline
     lvk::RenderPipelineDesc pipelineDesc{};
@@ -229,140 +234,74 @@ int main(int argc, char *argv[]) {
     pipelineDesc.smFrag = frag;
     pipelineDesc.color[0].format = ctx->getSwapchainFormat();
     
-    // Set up vertex input (position + texture coordinates)
+    // Set up vertex input (position + texture coordinates + normals)
     pipelineDesc.vertexInput.attributes[0] = {.location = 0, .binding = 0, .format = lvk::VertexFormat::Float3, .offset = 0};
     pipelineDesc.vertexInput.attributes[1] = {.location = 1, .binding = 0, .format = lvk::VertexFormat::Float2, .offset = 12};
-    pipelineDesc.vertexInput.inputBindings[0] = {.stride = 20}; // 3 floats + 2 floats * 4 bytes = 20 bytes
+    pipelineDesc.vertexInput.attributes[2] = {.location = 2, .binding = 0, .format = lvk::VertexFormat::Float3, .offset = 20};
+    pipelineDesc.vertexInput.inputBindings[0] = {.stride = 32}; // 3 + 2 + 3 floats * 4 bytes = 32 bytes
     
     const lvk::Holder<lvk::RenderPipelineHandle> pipeline = ctx->createRenderPipeline(pipelineDesc);
-    
-    // Create sampler for textures
-    auto sampler = ctx->createSampler({
-        .minFilter = lvk::SamplerFilter_Linear,
-        .magFilter = lvk::SamplerFilter_Linear,
-        .mipMap = lvk::SamplerMip_Linear,
-        .wrapU = lvk::SamplerWrap_Repeat,
-        .wrapV = lvk::SamplerWrap_Repeat,
-        .debugName = "texture_sampler"
-    }, nullptr);
-    
-    // Push constants for MVP matrices only
-    struct PushConstants {
-        glm::mat4 model;
-        glm::mat4 view;
-        glm::mat4 proj;
-    };
 
+    // Create depth texture
+    auto depthTexture = ctx->createTexture({
+        .type = lvk::TextureType_2D,
+        .format = lvk::Format_Z_F32,
+        .dimensions = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1},
+        .usage = lvk::TextureUsageBits_Attachment,
+        .debugName = "depth_buffer"
+    });
+
+    // Main render loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-        glfwGetFramebufferSize(window, &width, &height);
-        if (!width || !height) {
-            continue;
-        }
         
-        // Camera movement
-        float moveSpeed = 0.003f; // Even slower movement
-        float lookSpeed = 0.005f; // Keep rotation speed the same
-        glm::vec3 forward = glm::normalize(camTarget - camPos);
-        glm::vec3 right = glm::normalize(glm::cross(forward, camUp));
-        
-        // WASD movement
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) {
-            camPos += forward * moveSpeed;
-            camTarget += forward * moveSpeed;
-        }
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) {
-            camPos -= forward * moveSpeed;
-            camTarget -= forward * moveSpeed;
-        }
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) {
-            camPos -= right * moveSpeed;
-            camTarget -= right * moveSpeed;
-        }
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) {
-            camPos += right * moveSpeed;
-            camTarget += right * moveSpeed;
-        }
-        
-        // Arrow keys for looking around
-        if (glfwGetKey(window, GLFW_KEY_UP) == GLFW_PRESS) {
-            camTarget -= camUp * lookSpeed;
-        }
-        if (glfwGetKey(window, GLFW_KEY_DOWN) == GLFW_PRESS) {
-            camTarget += camUp * lookSpeed;
-        }
-        if (glfwGetKey(window, GLFW_KEY_LEFT) == GLFW_PRESS) {
-            camTarget -= right * lookSpeed;
-        }
-        if (glfwGetKey(window, GLFW_KEY_RIGHT) == GLFW_PRESS) {
-            camTarget += right * lookSpeed;
-        }
+        int currentWidth, currentHeight;
+        glfwGetFramebufferSize(window, &currentWidth, &currentHeight);
+        if (!currentWidth || !currentHeight) continue;
         
         // Update camera
-        camera.LookAt(camPos, camTarget, camUp);
+        camera.Perspective(glm::radians(45.0f), (float)currentWidth / (float)currentHeight, 0.1f, 100.0f);
         
-        // Update push constants with MVP matrices only
-        PushConstants pc{};
-        pc.model = glm::mat4(1.0f); // Identity matrix for now
-        pc.view = camera.GetViewMatrix();
-        pc.proj = camera.GetProjectionMatrix();
+        // Create render pass
+        const lvk::RenderPass renderPass = {
+            .color = {{.loadOp = lvk::LoadOp_Clear, .clearColor = {0.1f, 0.1f, 0.1f, 1.0f}}},
+            .depth = {.loadOp = lvk::LoadOp_Clear, .clearDepth = 1.0f}
+        };
         
-        lvk::ICommandBuffer &command_buffer = ctx->acquireCommandBuffer();
-        command_buffer.cmdBeginRendering({.color = {{.loadOp = lvk::LoadOp_Clear, .clearColor = {0.0f, 0.0f, 0.0f, 1.0f}}}},
-                                         {.color = {{.texture = ctx->getCurrentSwapchainTexture()}}});
-        command_buffer.cmdBindRenderPipeline(pipeline);
-        command_buffer.cmdPushConstants(pc, lvk::Stage_Vert);
+        const lvk::Framebuffer framebuffer = {
+            .color = {{.texture = ctx->getCurrentSwapchainTexture()}},
+            .depthStencil = {.texture = depthTexture}
+        };
         
-        // Test: Render a simple hardcoded triangle first
-        if (false) { // Set to true to test with hardcoded triangle
-            // Create a simple test triangle
-            float testVertices[] = {
-                -0.5f, -0.5f, 0.0f,  // Bottom left
-                 0.5f, -0.5f, 0.0f,  // Bottom right  
-                 0.0f,  0.5f, 0.0f   // Top
-            };
-            uint32_t testIndices[] = {0, 1, 2};
-            
-            // Create test buffers
-            lvk::BufferDesc vdesc{};
-            vdesc.size = sizeof(testVertices);
-            vdesc.usage = lvk::BufferUsageBits_Vertex;
-            vdesc.storage = lvk::StorageType_HostVisible;
-            auto testVertexBuffer = ctx->createBuffer(vdesc, "test_vertex");
-            
-            lvk::BufferDesc idesc{};
-            idesc.size = sizeof(testIndices);
-            idesc.usage = lvk::BufferUsageBits_Index;
-            idesc.storage = lvk::StorageType_HostVisible;
-            auto testIndexBuffer = ctx->createBuffer(idesc, "test_index");
-            
-            // Upload test data
-            float* vtx = (float*)ctx->getMappedPtr(testVertexBuffer);
-            memcpy(vtx, testVertices, sizeof(testVertices));
-            
-            uint32_t* idx = (uint32_t*)ctx->getMappedPtr(testIndexBuffer);
-            memcpy(idx, testIndices, sizeof(testIndices));
-            
-            // Render test triangle
-            command_buffer.cmdBindVertexBuffer(0, testVertexBuffer);
-            command_buffer.cmdBindIndexBuffer(testIndexBuffer, lvk::IndexFormat_UI32);
-            command_buffer.cmdDrawIndexed(3);
-        } else {
-            // Render only the first mesh to debug
-            if (!meshes.empty()) {
-                command_buffer.cmdBindVertexBuffer(0, meshes[0].vertexBuffer);
-                command_buffer.cmdBindIndexBuffer(meshes[0].indexBuffer, lvk::IndexFormat_UI32);
-                command_buffer.cmdDrawIndexed(meshes[0].indexCount);
+        lvk::ICommandBuffer& cmd = ctx->acquireCommandBuffer();
+        {
+            cmd.cmdBeginRendering(renderPass, framebuffer);
+            {
+                cmd.cmdBindRenderPipeline(pipeline);
+                cmd.cmdBindDepthState({.compareOp = lvk::CompareOp_Less, .isDepthWriteEnabled = true});
+                
+                // Render all meshes
+                for (const auto& mesh : meshes) {
+                    cmd.cmdBindVertexBuffer(0, mesh.vertexBuffer);
+                    cmd.cmdBindIndexBuffer(mesh.indexBuffer, lvk::IndexFormat_UI32);
+                    
+                    // Set up MVP matrix
+                    glm::mat4 model = glm::mat4(1.0f);
+                    glm::mat4 view = camera.GetViewMatrix();
+                    glm::mat4 proj = camera.GetProjectionMatrix();
+                    glm::mat4 mvp = proj * view * model;
+                    
+                    cmd.cmdPushConstants(mvp);
+                    cmd.cmdDrawIndexed(mesh.indexCount);
+                }
             }
+            cmd.cmdEndRendering();
         }
-
-        command_buffer.cmdEndRendering();
-        ctx->submit(command_buffer, ctx->getCurrentSwapchainTexture());
+        ctx->submit(cmd, ctx->getCurrentSwapchainTexture());
     }
     
-    cgltf_free(gltf);
-    ctx.release();
-    glfwDestroyWindow(window);
-    glfwTerminate();
+    // Cleanup
+    aiReleaseImport(scene);
+    
     return 0;
 }
