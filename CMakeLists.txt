@@ -13,13 +13,8 @@ include_directories(deps)
 include_directories(deps/src)
 include_directories(external)
 
-# Remove ImGui from our deps since LightweightVK provides it
-set(CMAKE_DISABLE_FIND_PACKAGE_ImGui TRUE)
-
 # Add subdirectories for bootstrapped libraries
 add_subdirectory(deps/src/glm)
-add_subdirectory(deps/src/spdlog)
-add_subdirectory(deps/src/yaml-cpp)
 
 # LightweightVK setup
 set(LIGHTWEIGHTVK_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/deps/src/lightweightvk)
@@ -28,6 +23,20 @@ include_directories(${LIGHTWEIGHTVK_SOURCE_DIR}/include)
 # Disable Tracy to avoid build issues
 set(LVK_WITH_TRACY OFF CACHE BOOL "Disable Tracy profiler")
 set(LVK_WITH_TRACY_GPU OFF CACHE BOOL "Disable Tracy GPU profiler")
+
+# Configure ktx like the cookbook
+set(KTX_FEATURE_DOC            OFF CACHE BOOL "")
+set(KTX_FEATURE_GL_UPLOAD      OFF CACHE BOOL "")
+set(KTX_FEATURE_JNI            OFF CACHE BOOL "")
+set(KTX_FEATURE_KTX1            ON CACHE BOOL "")
+set(KTX_FEATURE_KTX2            ON CACHE BOOL "")
+set(KTX_FEATURE_LOADTEST_APPS  OFF CACHE BOOL "")
+set(KTX_FEATURE_STATIC_LIBRARY  ON CACHE BOOL "")
+set(KTX_FEATURE_TESTS          OFF CACHE BOOL "")
+set(KTX_FEATURE_TOOLS          OFF CACHE BOOL "")
+set(KTX_FEATURE_VK_UPLOAD      OFF CACHE BOOL "")
+
+# KTX configuration (working)
 
 add_subdirectory(${LIGHTWEIGHTVK_SOURCE_DIR})
 
@@ -40,6 +49,7 @@ set(ASSIMP_INSTALL_PDB OFF CACHE BOOL "")
 set(ASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT OFF CACHE BOOL "")
 set(ASSIMP_BUILD_OBJ_IMPORTER ON CACHE BOOL "")
 set(ASSIMP_BUILD_GLTF_IMPORTER ON CACHE BOOL "")
+set(ASSIMP_BUILD_FBX_IMPORTER ON CACHE BOOL "")
 set(ASSIMP_BUILD_ZLIB ON CACHE BOOL "")
 
 add_subdirectory(deps/src/assimp)
@@ -50,6 +60,16 @@ endif()
 # Set folder property for assimp
 set_property(TARGET assimp PROPERTY FOLDER "third-party")
 
+# Handle zlib on Windows like the cookbook
+if(WIN32)
+  if(TARGET zlibstatic)
+    set_property(TARGET zlibstatic PROPERTY FOLDER "third-party")
+  endif()
+  if(TARGET UpdateAssimpLibsDebugSymbolsAndDLLs)
+    set_property(TARGET UpdateAssimpLibsDebugSymbolsAndDLLs PROPERTY FOLDER "third-party")
+  endif()
+endif()
+
 # Disable warnings in third-party code
 if(MSVC)
     target_compile_options(assimp PRIVATE /wd4267)
@@ -58,7 +78,13 @@ else()
     target_compile_options(assimp PRIVATE 
         $<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference>
     )
+    # Add specific flags for zlib compilation with MinGW
+    target_compile_options(assimp PRIVATE 
+        $<$<COMPILE_LANGUAGE:C>:-Wno-error -Wno-unused-variable -Wno-unused-function -Wno-unused-parameter -Wno-sign-compare>
+    )
 endif()
+
+# MinGW compatibility (working)
 
 # Main engine sources
 file(GLOB_RECURSE EngineSources CONFIGURE_DEPENDS
@@ -67,39 +93,28 @@ file(GLOB_RECURSE EngineSources CONFIGURE_DEPENDS
 )
 
 # Create the main executable
-add_executable(VulkanEngine ${EngineSources} src/main.cpp)
+add_executable(VulkanEngine ${EngineSources})
 
 # Link libraries - use the same approach as cookbook
 target_link_libraries(VulkanEngine PRIVATE 
     glm::glm
     glfw 
     Vulkan::Vulkan 
-    spdlog::spdlog 
-    yaml-cpp
     assimp
     LVKLibrary
     LVKVulkan
 )
 
-# Compile definitions
-target_compile_definitions(VulkanEngine PRIVATE 
-    TINYOBJLOADER_IMPLEMENTATION
-    STB_IMAGE_IMPLEMENTATION
-)
+# Compile definitions - removed unused ones
 
 # Include directories
 target_include_directories(VulkanEngine PRIVATE 
     "src"
-    "deps/src/tiny_obj_loader"
-    "deps/src/stb"
-    "deps/src/yaml-cpp/include"
     ${LIGHTWEIGHTVK_SOURCE_DIR}/include
 )
 
 # Compile features
 target_compile_features(VulkanEngine PRIVATE cxx_std_20)
-
-# Use LightweightVK's ImGui instead of our own to avoid version conflicts
 
 # Precompiled headers
 #target_precompile_headers(VulkanEngine PRIVATE "src/precomp.h")
@@ -107,16 +122,7 @@ target_compile_features(VulkanEngine PRIVATE cxx_std_20)
 set(LVK_WITH_GLFW ON CACHE BOOL "Enable GLFW window support")
 target_compile_definitions(VulkanEngine PUBLIC LVK_WITH_GLFW=1)
 
-# Shader compilation
-include(cmake/Shaders.cmake)
-file(GLOB_RECURSE ShaderSources CONFIGURE_DEPENDS
-    "shaders/*.vert"
-    "shaders/*.frag"
-    "shaders/*.comp"
-)
-
-add_shaders(VulkanEngineShaders ${ShaderSources})
-add_dependencies(VulkanEngine VulkanEngineShaders)
+# Shader compilation removed - using runtime loading
 
 # Copy assets to build directory
 file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/assets" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")

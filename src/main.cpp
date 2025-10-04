@@ -2,23 +2,20 @@
 // Created by Yibuz Pokopodrozo on 2025-09-16.
 //
 
-#include <filesystem>
-#include <iostream>
+#include <lvk/LVK.h>
 #include <GLFW/glfw3.h>
-#include <lightweightvk/lvk/LVK.h>
-#include <vector>
-#include <cstring>
-#include <fstream>
-#include <sstream>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <assimp/cimport.h>
 #include <assimp/version.h>
-#include "Camera.h"
-#include <stb_image.h>
+#include <iostream>
+#include <vector>
+#include <cstring>
+#include <fstream>
+#include <sstream>
+#include <filesystem>
 
 std::string ReadFile(const std::filesystem::path &shader_path) {
     if (!exists(shader_path) || !is_regular_file(shader_path)) return {};
@@ -33,6 +30,8 @@ std::string ReadFile(const std::filesystem::path &shader_path) {
 
 // Helper: Load FBX model using assimp
 const aiScene* LoadFBX(const char* path) {
+    std::cout << "Attempting to load FBX file: " << path << std::endl;
+    
     const aiScene* scene = aiImportFile(path, 
         aiProcess_Triangulate | 
         aiProcess_FlipUVs | 
@@ -41,8 +40,11 @@ const aiScene* LoadFBX(const char* path) {
     
     if (!scene) {
         std::cerr << "Failed to load FBX: " << path << "\n";
+        std::cerr << "Assimp error: " << aiGetErrorString() << std::endl;
         return nullptr;
     }
+    
+    std::cout << "FBX loaded successfully. Meshes: " << scene->mNumMeshes << std::endl;
     
     if (!scene->HasMeshes()) {
         std::cerr << "No meshes found in FBX file: " << path << "\n";
@@ -54,33 +56,10 @@ const aiScene* LoadFBX(const char* path) {
 }
 
 // Helper: Load texture from file
-lvk::Holder<lvk::TextureHandle> LoadTexture(lvk::IContext* ctx, const char* path) {
-    int width, height, channels;
-    unsigned char* data = stbi_load(path, &width, &height, &channels, 4); // Force RGBA
-    if (!data) {
-        std::cerr << "Failed to load texture: " << path << std::endl;
-        return {};
-    }
-    
-    // Create texture with data directly (lvk style)
-    auto texture = ctx->createTexture({
-        .type = lvk::TextureType_2D,
-        .format = lvk::Format_RGBA_UN8,
-        .dimensions = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1},
-        .usage = lvk::TextureUsageBits_Sampled,
-        .data = data,
-        .debugName = "texture"
-    });
-    
-    stbi_image_free(data);
-    return texture;
-}
+// Removed LoadTexture - using simple approach like cookbook
 
-struct Vertex {
-    glm::vec3 position;
-    glm::vec2 texCoord;
-    glm::vec3 normal;
-};
+// Simplified vertex structure to match cookbook
+using Vertex = glm::vec3; // Just position for now, like the cookbook example
 
 struct MeshBuffers {
     lvk::Holder<lvk::BufferHandle> vertexBuffer;
@@ -102,83 +81,48 @@ MeshBuffers UploadMesh(lvk::IContext* ctx, const aiMesh* mesh) {
         throw std::runtime_error("Mesh has no positions");
     }
 
-    size_t vertexCount = mesh->mNumVertices;
-    size_t indexCount = mesh->mNumFaces * 3; // Triangulated
-    out.indexCount = static_cast<uint32_t>(indexCount);
-
-    // Create vertex data with position, texture coordinates, and normals
-    std::vector<Vertex> vertices(vertexCount);
-    for (size_t i = 0; i < vertexCount; ++i) {
-        vertices[i].position = glm::vec3(
-            mesh->mVertices[i].x, 
-            mesh->mVertices[i].y, 
-            mesh->mVertices[i].z
-        );
-        
-        // Texture coordinates (use first UV channel if available)
-        if (mesh->HasTextureCoords(0)) {
-            vertices[i].texCoord = glm::vec2(
-                mesh->mTextureCoords[0][i].x,
-                mesh->mTextureCoords[0][i].y
-            );
-        } else {
-            vertices[i].texCoord = glm::vec2(0.0f, 0.0f);
-        }
-        
-        // Normals
-        if (mesh->HasNormals()) {
-            vertices[i].normal = glm::vec3(
-                mesh->mNormals[i].x,
-                mesh->mNormals[i].y,
-                mesh->mNormals[i].z
-            );
-        } else {
-            vertices[i].normal = glm::vec3(0.0f, 1.0f, 0.0f);
-        }
+    // Simplified approach like cookbook - just positions
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    
+    // Extract positions
+    for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
+        const aiVector3D v = mesh->mVertices[i];
+        vertices.push_back(glm::vec3(v.x, v.y, v.z));
     }
-
+    
     // Extract indices
-    std::vector<uint32_t> indices(indexCount);
-    size_t idx = 0;
-    for (size_t i = 0; i < mesh->mNumFaces; ++i) {
-        const aiFace& face = mesh->mFaces[i];
-        for (size_t j = 0; j < face.mNumIndices; ++j) {
-            indices[idx++] = face.mIndices[j];
+    for (unsigned int i = 0; i < mesh->mNumFaces; i++) {
+        for (int j = 0; j < 3; j++) {
+            indices.push_back(mesh->mFaces[i].mIndices[j]);
         }
     }
     
+    out.indexCount = static_cast<uint32_t>(indices.size());
+    
     // Debug: Print first few vertices
     std::cout << "Mesh vertices: ";
-    for (int i = 0; i < 3 && i < vertexCount; ++i) {
-        std::cout << "(" << vertices[i].position.x << ", " << vertices[i].position.y << ", " << vertices[i].position.z << ") ";
+    for (int i = 0; i < 3 && i < vertices.size(); ++i) {
+        std::cout << "(" << vertices[i].x << ", " << vertices[i].y << ", " << vertices[i].z << ") ";
     }
     std::cout << std::endl;
 
-    // --- Upload via LightweightVK
-    {
-        lvk::BufferDesc vdesc{};
-        vdesc.size = vertices.size() * sizeof(Vertex);
-        vdesc.usage = lvk::BufferUsageBits_Vertex;
-        vdesc.storage = lvk::StorageType_Device;
-
-        out.vertexBuffer = ctx->createBuffer(vdesc, "vertex_buffer");
-        
-        // Upload data
-        Vertex* vtx = (Vertex*)ctx->getMappedPtr(out.vertexBuffer);
-        memcpy(vtx, vertices.data(), vertices.size() * sizeof(Vertex));
-    }
-    {
-        lvk::BufferDesc idesc{};
-        idesc.size = indices.size() * sizeof(uint32_t);
-        idesc.usage = lvk::BufferUsageBits_Index;
-        idesc.storage = lvk::StorageType_Device;
-
-        out.indexBuffer = ctx->createBuffer(idesc, "index_buffer");
-        
-        // Upload data
-        uint32_t* idx = (uint32_t*)ctx->getMappedPtr(out.indexBuffer);
-        memcpy(idx, indices.data(), indices.size() * sizeof(uint32_t));
-    }
+    // Create buffers exactly like cookbook
+    out.vertexBuffer = ctx->createBuffer({
+        .usage = lvk::BufferUsageBits_Vertex,
+        .storage = lvk::StorageType_Device,
+        .size = sizeof(Vertex) * vertices.size(),
+        .data = vertices.data(),
+        .debugName = "Buffer: vertex"
+    });
+    
+    out.indexBuffer = ctx->createBuffer({
+        .usage = lvk::BufferUsageBits_Index,
+        .storage = lvk::StorageType_Device,
+        .size = sizeof(uint32_t) * indices.size(),
+        .data = indices.data(),
+        .debugName = "Buffer: index"
+    });
 
     return out;
 }
@@ -190,26 +134,37 @@ int main(int argc, char *argv[]) {
     GLFWwindow *window = lvk::initWindow("VKEngine", width, height, false);
     std::unique_ptr<lvk::IContext> ctx = lvk::createVulkanContextWithSwapchain(window, width, height, {});
     
-    // Camera setup
-    Camera camera;
-    glm::vec3 camPos(0.0f, 0.0f, 5.0f);
-    glm::vec3 camTarget(0.0f, 0.0f, 0.0f);
-    glm::vec3 camUp(0.0f, 1.0f, 0.0f);
-    
-    // Set up perspective projection
-    camera.Perspective(glm::radians(45.0f), (float)width / (float)height, 0.1f, 100.0f);
-    camera.LookAt(camPos, camTarget, camUp);
+    // Simple setup like cookbook
     
     // Load FBX asset
+    std::cout << "Current working directory: " << std::filesystem::current_path() << std::endl;
+    std::cout << "Looking for FBX file: assets/skull/source/skull.fbx" << std::endl;
+    
+    // Change to parent directory if we're in cmake-build-debug
+    if (std::filesystem::current_path().filename() == "cmake-build-debug") {
+        std::filesystem::current_path("..");
+        std::cout << "Changed to parent directory: " << std::filesystem::current_path() << std::endl;
+    }
+    
+    // Check if file exists
+    if (!std::filesystem::exists("assets/skull/source/skull.fbx")) {
+        std::cerr << "FBX file does not exist at: assets/skull/source/skull.fbx" << std::endl;
+        std::cerr << "Available files in assets/skull/source/:" << std::endl;
+        for (const auto& entry : std::filesystem::directory_iterator("assets/skull/source/")) {
+            std::cerr << "  " << entry.path() << std::endl;
+        }
+        return -1;
+    }
+    
+    std::cout << "FBX file exists, trying to load..." << std::endl;
+    
     const aiScene* scene = LoadFBX("assets/skull/source/skull.fbx");
-    if (!scene) return -1;
+    if (!scene) {
+        std::cerr << "Failed to load FBX file. Current working directory: " << std::filesystem::current_path() << std::endl;
+        return -1;
+    }
     
-    // Load textures for the skull model
-    auto texture0 = LoadTexture(ctx.get(), "assets/skull/textures/skullColor.png");
-    auto texture1 = LoadTexture(ctx.get(), "assets/skull/textures/skullNormal.png");
-    auto texture2 = LoadTexture(ctx.get(), "assets/skull/textures/skullRoughness.png");
-    
-    std::cout << "Loaded all textures successfully" << std::endl;
+    // Simple setup - no textures for now like cookbook
 
     std::vector<MeshBuffers> meshes;
     for (size_t mi = 0; mi < scene->mNumMeshes; ++mi) {
@@ -228,19 +183,20 @@ int main(int argc, char *argv[]) {
     const lvk::Holder<lvk::ShaderModuleHandle> frag = ctx->createShaderModule(
         lvk::ShaderModuleDesc{(ReadFile("shaders/blinn_phong.frag").c_str()), lvk::Stage_Frag, ("frag shader")}, nullptr);
     
-    // Create pipeline
-    lvk::RenderPipelineDesc pipelineDesc{};
-    pipelineDesc.smVert = vert;
-    pipelineDesc.smFrag = frag;
-    pipelineDesc.color[0].format = ctx->getSwapchainFormat();
+    // Create pipeline exactly like cookbook
+    const lvk::VertexInput vdesc = {
+        .attributes    = { { .location = 0, .format = lvk::VertexFormat::Float3, .offset = 0 } },
+        .inputBindings = { { .stride = sizeof(glm::vec3) } },
+    };
     
-    // Set up vertex input (position + texture coordinates + normals)
-    pipelineDesc.vertexInput.attributes[0] = {.location = 0, .binding = 0, .format = lvk::VertexFormat::Float3, .offset = 0};
-    pipelineDesc.vertexInput.attributes[1] = {.location = 1, .binding = 0, .format = lvk::VertexFormat::Float2, .offset = 12};
-    pipelineDesc.vertexInput.attributes[2] = {.location = 2, .binding = 0, .format = lvk::VertexFormat::Float3, .offset = 20};
-    pipelineDesc.vertexInput.inputBindings[0] = {.stride = 32}; // 3 + 2 + 3 floats * 4 bytes = 32 bytes
-    
-    const lvk::Holder<lvk::RenderPipelineHandle> pipeline = ctx->createRenderPipeline(pipelineDesc);
+    lvk::Holder<lvk::RenderPipelineHandle> pipeline = ctx->createRenderPipeline({
+        .vertexInput = vdesc,
+        .smVert      = vert,
+        .smFrag      = frag,
+        .color       = { { .format = ctx->getSwapchainFormat() } },
+        .depthFormat = lvk::Format_Z_F32,
+        .cullMode    = lvk::CullMode_Back,
+    });
 
     // Create depth texture
     auto depthTexture = ctx->createTexture({
@@ -259,18 +215,22 @@ int main(int argc, char *argv[]) {
         glfwGetFramebufferSize(window, &currentWidth, &currentHeight);
         if (!currentWidth || !currentHeight) continue;
         
-        // Update camera
-        camera.Perspective(glm::radians(45.0f), (float)currentWidth / (float)currentHeight, 0.1f, 100.0f);
+        const float ratio = currentWidth / (float)currentHeight;
         
-        // Create render pass
+        // Simple MVP like cookbook
+        const glm::mat4 m = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1, 0, 0));
+        const glm::mat4 v = glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -1.5f)), (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f));
+        const glm::mat4 p = glm::perspective(45.0f, ratio, 0.1f, 1000.0f);
+        const glm::mat4 mvp = p * v * m;
+        
         const lvk::RenderPass renderPass = {
-            .color = {{.loadOp = lvk::LoadOp_Clear, .clearColor = {0.1f, 0.1f, 0.1f, 1.0f}}},
-            .depth = {.loadOp = lvk::LoadOp_Clear, .clearDepth = 1.0f}
+            .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 1.0f, 1.0f, 1.0f, 1.0f } } },
+            .depth = { .loadOp = lvk::LoadOp_Clear, .clearDepth = 1.0f }
         };
         
         const lvk::Framebuffer framebuffer = {
-            .color = {{.texture = ctx->getCurrentSwapchainTexture()}},
-            .depthStencil = {.texture = depthTexture}
+            .color        = { { .texture = ctx->getCurrentSwapchainTexture() } },
+            .depthStencil = { .texture = depthTexture },
         };
         
         lvk::ICommandBuffer& cmd = ctx->acquireCommandBuffer();
@@ -278,19 +238,12 @@ int main(int argc, char *argv[]) {
             cmd.cmdBeginRendering(renderPass, framebuffer);
             {
                 cmd.cmdBindRenderPipeline(pipeline);
-                cmd.cmdBindDepthState({.compareOp = lvk::CompareOp_Less, .isDepthWriteEnabled = true});
+                cmd.cmdBindDepthState({ .compareOp = lvk::CompareOp_Less, .isDepthWriteEnabled = true });
                 
                 // Render all meshes
                 for (const auto& mesh : meshes) {
                     cmd.cmdBindVertexBuffer(0, mesh.vertexBuffer);
                     cmd.cmdBindIndexBuffer(mesh.indexBuffer, lvk::IndexFormat_UI32);
-                    
-                    // Set up MVP matrix
-                    glm::mat4 model = glm::mat4(1.0f);
-                    glm::mat4 view = camera.GetViewMatrix();
-                    glm::mat4 proj = camera.GetProjectionMatrix();
-                    glm::mat4 mvp = proj * view * model;
-                    
                     cmd.cmdPushConstants(mvp);
                     cmd.cmdDrawIndexed(mesh.indexCount);
                 }
