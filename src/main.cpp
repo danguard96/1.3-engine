@@ -10,22 +10,34 @@
 #include <assimp/postprocess.h>
 #include <assimp/cimport.h>
 #include <assimp/version.h>
+#include <stb_image.h>
 #include <iostream>
 #include <vector>
-#include <cstring>
 #include <fstream>
-#include <sstream>
 #include <filesystem>
+#include <memory>
+#include <stdexcept>
 
-std::string ReadFile(const std::filesystem::path &shader_path) {
-    if (!exists(shader_path) || !is_regular_file(shader_path)) return {};
+std::string ReadFile(const std::filesystem::path& shader_path) {
+    if (!std::filesystem::exists(shader_path) || !std::filesystem::is_regular_file(shader_path)) {
+        return {};
+    }
 
-    std::ifstream file(shader_path);
-    if (!file.is_open()) return {};
+    std::ifstream file(shader_path, std::ios::binary);
+    if (!file.is_open()) {
+        return {};
+    }
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
+    // Reserve space for better performance
+    file.seekg(0, std::ios::end);
+    const auto file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::string content;
+    content.reserve(static_cast<size_t>(file_size));
+    content.assign(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+    
+    return content;
 }
 
 // Helper: Load FBX model using assimp
@@ -55,11 +67,34 @@ const aiScene* LoadFBX(const char* path) {
     return scene;
 }
 
-// Helper: Load texture from file
-// Removed LoadTexture - using simple approach like cookbook
+// Helper: Load texture from file with error handling
+lvk::Holder<lvk::TextureHandle> LoadTexture(lvk::IContext* ctx, const char* fileName) {
+    int width, height, channels;
+    unsigned char* data = stbi_load(fileName, &width, &height, &channels, 4); // Force RGBA
+    if (!data) {
+        std::cerr << "Failed to load texture: " << fileName << std::endl;
+        return {};
+    }
+    
+    auto texture = ctx->createTexture({
+        .type = lvk::TextureType_2D,
+        .format = lvk::Format_RGBA_SRGB8, // Use sRGB for color textures
+        .dimensions = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1},
+        .usage = lvk::TextureUsageBits_Sampled,
+        .data = data,
+        .debugName = fileName
+    });
+    
+    stbi_image_free(data);
+    return texture;
+}
 
-// Simplified vertex structure to match cookbook
-using Vertex = glm::vec3; // Just position for now, like the cookbook example
+// Vertex structure with position, normal, and texture coordinates
+struct Vertex {
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 texCoord;
+};
 
 struct MeshBuffers {
     lvk::Holder<lvk::BufferHandle> vertexBuffer;
@@ -81,14 +116,35 @@ MeshBuffers UploadMesh(lvk::IContext* ctx, const aiMesh* mesh) {
         throw std::runtime_error("Mesh has no positions");
     }
 
-    // Simplified approach like cookbook - just positions
+    // Extract vertices with position, normal, and texture coordinates
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
     
-    // Extract positions
+    // Extract vertex data
     for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
-        const aiVector3D v = mesh->mVertices[i];
-        vertices.push_back(glm::vec3(v.x, v.y, v.z));
+        Vertex vertex;
+        
+        // Position
+        const aiVector3D pos = mesh->mVertices[i];
+        vertex.position = glm::vec3(pos.x, pos.y, pos.z);
+        
+        // Normal
+        if (mesh->HasNormals()) {
+            const aiVector3D norm = mesh->mNormals[i];
+            vertex.normal = glm::vec3(norm.x, norm.y, norm.z);
+    } else {
+            vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f); // Default up normal
+        }
+        
+        // Texture coordinates
+        if (mesh->HasTextureCoords(0)) {
+            const aiVector3D tex = mesh->mTextureCoords[0][i];
+            vertex.texCoord = glm::vec2(tex.x, tex.y);
+        } else {
+            vertex.texCoord = glm::vec2(0.0f, 0.0f); // Default UV
+        }
+        
+        vertices.push_back(vertex);
     }
     
     // Extract indices
@@ -99,15 +155,8 @@ MeshBuffers UploadMesh(lvk::IContext* ctx, const aiMesh* mesh) {
     }
     
     out.indexCount = static_cast<uint32_t>(indices.size());
-    
-    // Debug: Print first few vertices
-    std::cout << "Mesh vertices: ";
-    for (int i = 0; i < 3 && i < vertices.size(); ++i) {
-        std::cout << "(" << vertices[i].x << ", " << vertices[i].y << ", " << vertices[i].z << ") ";
-    }
-    std::cout << std::endl;
 
-    // Create buffers exactly like cookbook
+    // Create buffers with optimized data upload
     out.vertexBuffer = ctx->createBuffer({
         .usage = lvk::BufferUsageBits_Vertex,
         .storage = lvk::StorageType_Device,
@@ -136,57 +185,49 @@ int main(int argc, char *argv[]) {
     
     // Simple setup like cookbook
     
-    // Load FBX asset
-    std::cout << "Current working directory: " << std::filesystem::current_path() << std::endl;
-    std::cout << "Looking for FBX file: assets/skull/source/skull.fbx" << std::endl;
-    
     // Change to parent directory if we're in cmake-build-debug
     if (std::filesystem::current_path().filename() == "cmake-build-debug") {
         std::filesystem::current_path("..");
-        std::cout << "Changed to parent directory: " << std::filesystem::current_path() << std::endl;
     }
     
-    // Check if file exists
-    if (!std::filesystem::exists("assets/skull/source/skull.fbx")) {
-        std::cerr << "FBX file does not exist at: assets/skull/source/skull.fbx" << std::endl;
-        std::cerr << "Available files in assets/skull/source/:" << std::endl;
-        for (const auto& entry : std::filesystem::directory_iterator("assets/skull/source/")) {
-            std::cerr << "  " << entry.path() << std::endl;
-        }
-        return -1;
-    }
-    
-    std::cout << "FBX file exists, trying to load..." << std::endl;
-    
+    // Load FBX asset
     const aiScene* scene = LoadFBX("assets/skull/source/skull.fbx");
     if (!scene) {
-        std::cerr << "Failed to load FBX file. Current working directory: " << std::filesystem::current_path() << std::endl;
+        std::cerr << "Failed to load FBX file" << std::endl;
         return -1;
     }
     
-    // Simple setup - no textures for now like cookbook
+    // Load textures for the skull model
+    auto skullColor = LoadTexture(ctx.get(), "assets/skull/textures/skullColor.png");
 
     std::vector<MeshBuffers> meshes;
+    meshes.reserve(scene->mNumMeshes); // Reserve space for better performance
+    
     for (size_t mi = 0; mi < scene->mNumMeshes; ++mi) {
-        try {
-            MeshBuffers mesh = UploadMesh(ctx.get(), scene->mMeshes[mi]);
-            meshes.push_back(std::move(mesh));
-            std::cout << "Uploaded mesh " << mi << ": " << meshes.back().indexCount << " indices\n";
-        } catch (const std::exception& e) {
+            try {
+            meshes.emplace_back(UploadMesh(ctx.get(), scene->mMeshes[mi]));
+            } catch (const std::exception& e) {
             std::cerr << "Failed to upload mesh " << mi << ": " << e.what() << std::endl;
         }
     }
 
-    // Create shaders
-    const lvk::Holder<lvk::ShaderModuleHandle> vert = ctx->createShaderModule(
-        lvk::ShaderModuleDesc{(ReadFile("shaders/blinn_phong.vert").c_str()), lvk::Stage_Vert, ("vert shader")}, nullptr);
-    const lvk::Holder<lvk::ShaderModuleHandle> frag = ctx->createShaderModule(
-        lvk::ShaderModuleDesc{(ReadFile("shaders/blinn_phong.frag").c_str()), lvk::Stage_Frag, ("frag shader")}, nullptr);
+    // Create shaders with cached source
+    const std::string vertSource = ReadFile("shaders/blinn_phong.vert");
+    const std::string fragSource = ReadFile("shaders/blinn_phong.frag");
     
-    // Create pipeline exactly like cookbook
+    const lvk::Holder<lvk::ShaderModuleHandle> vert = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{vertSource.c_str(), lvk::Stage_Vert, "vert shader"}, nullptr);
+    const lvk::Holder<lvk::ShaderModuleHandle> frag = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{fragSource.c_str(), lvk::Stage_Frag, "frag shader"}, nullptr);
+    
+    // Create pipeline with texture support
     const lvk::VertexInput vdesc = {
-        .attributes    = { { .location = 0, .format = lvk::VertexFormat::Float3, .offset = 0 } },
-        .inputBindings = { { .stride = sizeof(glm::vec3) } },
+        .attributes    = { 
+            { .location = 0, .format = lvk::VertexFormat::Float3, .offset = offsetof(Vertex, position) },
+            { .location = 1, .format = lvk::VertexFormat::Float3, .offset = offsetof(Vertex, normal) },
+            { .location = 2, .format = lvk::VertexFormat::Float2, .offset = offsetof(Vertex, texCoord) }
+        },
+        .inputBindings = { { .stride = sizeof(Vertex) } },
     };
     
     lvk::Holder<lvk::RenderPipelineHandle> pipeline = ctx->createRenderPipeline({
@@ -197,6 +238,19 @@ int main(int argc, char *argv[]) {
         .depthFormat = lvk::Format_Z_F32,
         .cullMode    = lvk::CullMode_Back,
     });
+    
+    // Create sampler for textures
+    lvk::Holder<lvk::SamplerHandle> sampler = ctx->createSampler({
+        .minFilter = lvk::SamplerFilter::SamplerFilter_Linear,
+        .magFilter = lvk::SamplerFilter::SamplerFilter_Linear,
+        .mipMap    = lvk::SamplerMip::SamplerMip_Linear,
+        .wrapU     = lvk::SamplerWrap::SamplerWrap_Repeat,
+        .wrapV     = lvk::SamplerWrap::SamplerWrap_Repeat,
+        .wrapW     = lvk::SamplerWrap::SamplerWrap_Repeat,
+        .debugName = "Texture Sampler",
+    });
+
+    // We'll use simple push constants for now
 
     // Create depth texture
     auto depthTexture = ctx->createTexture({
@@ -217,14 +271,15 @@ int main(int argc, char *argv[]) {
         
         const float ratio = currentWidth / (float)currentHeight;
         
-        // Simple MVP like cookbook
+        // Simple MVP like cookbook - adjusted for better viewing
         const glm::mat4 m = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1, 0, 0));
-        const glm::mat4 v = glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.5f, -1.5f)), (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f));
+        // Move camera closer and position skull higher in the window
+        const glm::mat4 v = glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.0f)), (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f));
         const glm::mat4 p = glm::perspective(45.0f, ratio, 0.1f, 1000.0f);
         const glm::mat4 mvp = p * v * m;
         
         const lvk::RenderPass renderPass = {
-            .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 1.0f, 1.0f, 1.0f, 1.0f } } },
+            .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 0.2f, 0.3f, 0.4f, 1.0f } } }, // Dark greyish blue
             .depth = { .loadOp = lvk::LoadOp_Clear, .clearDepth = 1.0f }
         };
         
@@ -235,16 +290,25 @@ int main(int argc, char *argv[]) {
         
         lvk::ICommandBuffer& cmd = ctx->acquireCommandBuffer();
         {
-            cmd.cmdBeginRendering(renderPass, framebuffer);
+            // Pass texture as dependency so LightweightVK can bind it to descriptor sets
+            cmd.cmdBeginRendering(renderPass, framebuffer, { 
+                .textures = { skullColor }
+            });
             {
                 cmd.cmdBindRenderPipeline(pipeline);
                 cmd.cmdBindDepthState({ .compareOp = lvk::CompareOp_Less, .isDepthWriteEnabled = true });
+                
+                // Use push constants with texture index
+                struct PushConstants {
+                    glm::mat4 mvp;
+                    uint32_t textureIndex;
+                } pushConstants = { mvp, skullColor.index() };
+                cmd.cmdPushConstants(pushConstants);
                 
                 // Render all meshes
                 for (const auto& mesh : meshes) {
                     cmd.cmdBindVertexBuffer(0, mesh.vertexBuffer);
                     cmd.cmdBindIndexBuffer(mesh.indexBuffer, lvk::IndexFormat_UI32);
-                    cmd.cmdPushConstants(mvp);
                     cmd.cmdDrawIndexed(mesh.indexCount);
                 }
             }

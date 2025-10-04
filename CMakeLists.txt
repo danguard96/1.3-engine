@@ -5,13 +5,14 @@ project(VulkanEngine VERSION 1.3.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Enable parallel builds
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Find Vulkan
 find_package(Vulkan REQUIRED)
 
 # Include directories for bootstrapped dependencies
-include_directories(deps)
-include_directories(deps/src)
-include_directories(external)
+include_directories(deps deps/src external)
 
 # Add subdirectories for bootstrapped libraries
 add_subdirectory(deps/src/glm)
@@ -28,8 +29,8 @@ set(LVK_WITH_TRACY_GPU OFF CACHE BOOL "Disable Tracy GPU profiler")
 set(KTX_FEATURE_DOC            OFF CACHE BOOL "")
 set(KTX_FEATURE_GL_UPLOAD      OFF CACHE BOOL "")
 set(KTX_FEATURE_JNI            OFF CACHE BOOL "")
-set(KTX_FEATURE_KTX1            ON CACHE BOOL "")
-set(KTX_FEATURE_KTX2            ON CACHE BOOL "")
+set(KTX_FEATURE_KTX1            ON CACHE BOOL "")   # Re-enable for LightweightVK samples
+set(KTX_FEATURE_KTX2            ON CACHE BOOL "")   # Re-enable for LightweightVK samples
 set(KTX_FEATURE_LOADTEST_APPS  OFF CACHE BOOL "")
 set(KTX_FEATURE_STATIC_LIBRARY  ON CACHE BOOL "")
 set(KTX_FEATURE_TESTS          OFF CACHE BOOL "")
@@ -37,6 +38,18 @@ set(KTX_FEATURE_TOOLS          OFF CACHE BOOL "")
 set(KTX_FEATURE_VK_UPLOAD      OFF CACHE BOOL "")
 
 # KTX configuration (working)
+# Help CMake find bash for ktx
+if(WIN32)
+    find_program(BASH_EXECUTABLE bash PATHS "C:/Program Files/Git/bin" "C:/Program Files/Git/usr/bin")
+    if(BASH_EXECUTABLE)
+        message(STATUS "Found bash: ${BASH_EXECUTABLE}")
+    endif()
+    
+    # Additional KTX configuration for MinGW
+    set(KTX_FEATURE_LOADTEST_APPS OFF CACHE BOOL "")
+    set(KTX_FEATURE_TOOLS OFF CACHE BOOL "")
+    set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
+endif()
 
 add_subdirectory(${LIGHTWEIGHTVK_SOURCE_DIR})
 
@@ -77,11 +90,13 @@ else()
     # Only apply to C++ files, not C files
     target_compile_options(assimp PRIVATE 
         $<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference>
-    )
-    # Add specific flags for zlib compilation with MinGW
-    target_compile_options(assimp PRIVATE 
         $<$<COMPILE_LANGUAGE:C>:-Wno-error -Wno-unused-variable -Wno-unused-function -Wno-unused-parameter -Wno-sign-compare>
     )
+endif()
+
+# Add global compiler flags to suppress warnings for all targets
+if(NOT MSVC)
+    add_compile_options(-Wno-unused-variable -Wno-unused-function -Wno-unused-parameter)
 endif()
 
 # MinGW compatibility (working)
@@ -91,6 +106,10 @@ file(GLOB_RECURSE EngineSources CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.h"
 )
+
+# Optimize build performance
+set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG")
+set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -DDEBUG")
 
 # Create the main executable
 add_executable(VulkanEngine ${EngineSources})
@@ -105,19 +124,32 @@ target_link_libraries(VulkanEngine PRIVATE
     LVKVulkan
 )
 
-# Compile definitions - removed unused ones
+# Set target properties for optimization
+set_target_properties(VulkanEngine PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+)
+
+# Compile definitions
+target_compile_definitions(VulkanEngine PRIVATE 
+    STB_IMAGE_IMPLEMENTATION
+)
 
 # Include directories
 target_include_directories(VulkanEngine PRIVATE 
     "src"
+    "deps/src/stb"
     ${LIGHTWEIGHTVK_SOURCE_DIR}/include
 )
 
 # Compile features
 target_compile_features(VulkanEngine PRIVATE cxx_std_20)
 
-# Precompiled headers
-#target_precompile_headers(VulkanEngine PRIVATE "src/precomp.h")
+# Enable optimizations for release builds
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    target_compile_options(VulkanEngine PRIVATE -O3 -DNDEBUG)
+endif()
 
 set(LVK_WITH_GLFW ON CACHE BOOL "Enable GLFW window support")
 target_compile_definitions(VulkanEngine PUBLIC LVK_WITH_GLFW=1)
