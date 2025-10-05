@@ -73,6 +73,17 @@ endif()
 # Set folder property for assimp
 set_property(TARGET assimp PROPERTY FOLDER "third-party")
 
+# Additional assimp-specific flags for FBX parser issues
+if(NOT MSVC)
+    target_compile_options(assimp PRIVATE 
+        -Wno-dangling-reference 
+        -Wno-error=dangling-reference
+        -Wno-unused-variable
+        -Wno-unused-function
+        -Wno-unused-parameter
+    )
+endif()
+
 # Handle zlib on Windows like the cookbook
 if(WIN32)
   if(TARGET zlibstatic)
@@ -87,8 +98,9 @@ endif()
 if(MSVC)
     target_compile_options(assimp PRIVATE /wd4267)
 else()
-    # Only apply to C++ files, not C files
+    # Apply comprehensive warning suppression for assimp
     target_compile_options(assimp PRIVATE 
+        $<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference -Wno-error=dangling-reference>
         $<$<COMPILE_LANGUAGE:C>:-Wno-error -Wno-unused-variable -Wno-unused-function -Wno-unused-parameter -Wno-sign-compare>
     )
 endif()
@@ -96,6 +108,8 @@ endif()
 # Add global compiler flags to suppress warnings for all targets
 if(NOT MSVC)
     add_compile_options(-Wno-unused-variable -Wno-unused-function -Wno-unused-parameter)
+    # Additional flags for dangling reference issues
+    add_compile_options(-Wno-dangling-reference -Wno-error=dangling-reference)
 endif()
 
 # macOS-specific fixes

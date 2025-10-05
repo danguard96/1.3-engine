@@ -274,7 +274,7 @@ int main(int argc, char *argv[]) {
         // Simple MVP like cookbook - adjusted for better viewing
         const glm::mat4 m = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1, 0, 0));
         // Move camera closer and position skull higher in the window
-        const glm::mat4 v = glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -1.0f)), (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f));
+        const glm::mat4 v = glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -0.5f)), (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f));
         const glm::mat4 p = glm::perspective(45.0f, ratio, 0.1f, 1000.0f);
         const glm::mat4 mvp = p * v * m;
         
