@@ -18,6 +18,12 @@
 #include <memory>
 #include <stdexcept>
 
+// Component system includes
+#include <components/Actor.h>
+#include <components/TransformComponent.h>
+#include <components/MeshComponent.h>
+#include <components/CameraComponent.h>
+
 std::string ReadFile(const std::filesystem::path& shader_path) {
     if (!std::filesystem::exists(shader_path) || !std::filesystem::is_regular_file(shader_path)) {
         return {};
@@ -27,7 +33,7 @@ std::string ReadFile(const std::filesystem::path& shader_path) {
     if (!file.is_open()) {
         return {};
     }
-
+    
     // Reserve space for better performance
     file.seekg(0, std::ios::end);
     const auto file_size = file.tellg();
@@ -40,34 +46,7 @@ std::string ReadFile(const std::filesystem::path& shader_path) {
     return content;
 }
 
-// Helper: Load FBX model using assimp
-const aiScene* LoadFBX(const char* path) {
-    std::cout << "Attempting to load FBX file: " << path << std::endl;
-    
-    const aiScene* scene = aiImportFile(path, 
-        aiProcess_Triangulate | 
-        aiProcess_FlipUVs | 
-        aiProcess_GenNormals |
-        aiProcess_CalcTangentSpace);
-    
-    if (!scene) {
-        std::cerr << "Failed to load FBX: " << path << "\n";
-        std::cerr << "Assimp error: " << aiGetErrorString() << std::endl;
-        return nullptr;
-    }
-    
-    std::cout << "FBX loaded successfully. Meshes: " << scene->mNumMeshes << std::endl;
-    
-    if (!scene->HasMeshes()) {
-        std::cerr << "No meshes found in FBX file: " << path << "\n";
-        aiReleaseImport(scene);
-        return nullptr;
-    }
-    
-    return scene;
-}
-
-// Helper: Load texture from file with error handling
+// Helper function for texture loading (still needed for rendering)
 lvk::Holder<lvk::TextureHandle> LoadTexture(lvk::IContext* ctx, const char* fileName) {
     int width, height, channels;
     unsigned char* data = stbi_load(fileName, &width, &height, &channels, 4); // Force RGBA
@@ -96,91 +75,17 @@ struct Vertex {
     glm::vec2 texCoord;
 };
 
-struct MeshBuffers {
-    lvk::Holder<lvk::BufferHandle> vertexBuffer;
-    lvk::Holder<lvk::BufferHandle> indexBuffer;
-    uint32_t indexCount;
-    
-    // Make it movable but not copyable
-    MeshBuffers() = default;
-    MeshBuffers(const MeshBuffers&) = delete;
-    MeshBuffers& operator=(const MeshBuffers&) = delete;
-    MeshBuffers(MeshBuffers&&) = default;
-    MeshBuffers& operator=(MeshBuffers&&) = default;
-};
-
-MeshBuffers UploadMesh(lvk::IContext* ctx, const aiMesh* mesh) {
-    MeshBuffers out{};
-
-    if (!mesh->HasPositions()) {
-        throw std::runtime_error("Mesh has no positions");
-    }
-
-    // Extract vertices with position, normal, and texture coordinates
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    
-    // Extract vertex data
-    for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
-        Vertex vertex;
-        
-        // Position
-        const aiVector3D pos = mesh->mVertices[i];
-        vertex.position = glm::vec3(pos.x, pos.y, pos.z);
-        
-        // Normal
-        if (mesh->HasNormals()) {
-            const aiVector3D norm = mesh->mNormals[i];
-            vertex.normal = glm::vec3(norm.x, norm.y, norm.z);
-    } else {
-            vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f); // Default up normal
-        }
-        
-        // Texture coordinates
-        if (mesh->HasTextureCoords(0)) {
-            const aiVector3D tex = mesh->mTextureCoords[0][i];
-            vertex.texCoord = glm::vec2(tex.x, tex.y);
-        } else {
-            vertex.texCoord = glm::vec2(0.0f, 0.0f); // Default UV
-        }
-        
-        vertices.push_back(vertex);
-    }
-    
-    // Extract indices
-    for (unsigned int i = 0; i < mesh->mNumFaces; i++) {
-        for (int j = 0; j < 3; j++) {
-            indices.push_back(mesh->mFaces[i].mIndices[j]);
-        }
-    }
-    
-    out.indexCount = static_cast<uint32_t>(indices.size());
-
-    // Create buffers with optimized data upload
-    out.vertexBuffer = ctx->createBuffer({
-        .usage = lvk::BufferUsageBits_Vertex,
-        .storage = lvk::StorageType_Device,
-        .size = sizeof(Vertex) * vertices.size(),
-        .data = vertices.data(),
-        .debugName = "Buffer: vertex"
-    });
-    
-    out.indexBuffer = ctx->createBuffer({
-        .usage = lvk::BufferUsageBits_Index,
-        .storage = lvk::StorageType_Device,
-        .size = sizeof(uint32_t) * indices.size(),
-        .data = indices.data(),
-        .debugName = "Buffer: index"
-    });
-
-    return out;
-}
+// MeshBuffers struct is now defined in MeshComponent.h
+// UploadMesh function is now part of MeshComponent class
 
 int main(int argc, char *argv[]) {
     glfwInit();
     int width{800};
     int height{600};
     GLFWwindow *window = lvk::initWindow("VKEngine", width, height, false);
+    
+    // Enable cursor capture for mouse look
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     std::unique_ptr<lvk::IContext> ctx = lvk::createVulkanContextWithSwapchain(window, width, height, {});
     
     // Simple setup like cookbook
@@ -190,26 +95,115 @@ int main(int argc, char *argv[]) {
         std::filesystem::current_path("..");
     }
     
-    // Load FBX asset
-    const aiScene* scene = LoadFBX("assets/skull/source/skull.fbx");
-    if (!scene) {
-        std::cerr << "Failed to load FBX file" << std::endl;
+    // Load texture for rendering
+    auto skullColor = LoadTexture(ctx.get(), "assets/skull/textures/skullColor.png");
+    
+    // Component System Example
+    std::cout << "\n=== Component System Demo ===" << std::endl;
+    
+    // Create a skull actor with components
+    Actor* skullActor = new Actor();
+    
+    // Add transform component
+    skullActor->AddComponent<TransformComponent>(skullActor, 
+        glm::vec3(0.0f, 0.5f, 0.0f),  // Position
+        glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),  // 90° X-axis rotation
+        glm::vec3(1.0f, 1.0f, 1.0f)   // Scale
+    );
+    
+    // Add mesh component
+    skullActor->AddComponent<MeshComponent>(skullActor, ctx.get(), "assets/skull/source/skull.fbx");
+    
+    // Initialize the actor
+    if (!skullActor->OnCreate()) {
+        std::cerr << "Failed to create skull actor" << std::endl;
         return -1;
     }
     
-    // Load textures for the skull model
-    auto skullColor = LoadTexture(ctx.get(), "assets/skull/textures/skullColor.png");
-
-    std::vector<MeshBuffers> meshes;
-    meshes.reserve(scene->mNumMeshes); // Reserve space for better performance
+    // Create a second actor (another skull) next to the first one
+    Actor* skullActor2 = new Actor();
     
-    for (size_t mi = 0; mi < scene->mNumMeshes; ++mi) {
-            try {
-            meshes.emplace_back(UploadMesh(ctx.get(), scene->mMeshes[mi]));
-            } catch (const std::exception& e) {
-            std::cerr << "Failed to upload mesh " << mi << ": " << e.what() << std::endl;
-        }
+    // Add transform component for the second skull
+    skullActor2->AddComponent<TransformComponent>(skullActor2, 
+        glm::vec3(0.5f, 0.0f, 0.0f),  // Position - to the right of first skull
+        glm::angleAxis(glm::radians(-90.0f), glm::vec3(1.0f, 0.0f, 0.0f)),  // Same rotation
+        glm::vec3(1.0f, 1.0f, 1.0f)   // Scale
+    );
+    
+    // Add mesh component for the second skull
+    skullActor2->AddComponent<MeshComponent>(skullActor2, ctx.get(), "assets/skull/source/skull.fbx");
+    
+    // Initialize the second actor
+    if (!skullActor2->OnCreate()) {
+        std::cerr << "Failed to create second skull actor" << std::endl;
+        return -1;
     }
+    
+    // List components for both actors
+    std::cout << "\n=== First Skull Actor ===" << std::endl;
+    skullActor->ListComponents();
+    
+    std::cout << "\n=== Second Skull Actor ===" << std::endl;
+    skullActor2->ListComponents();
+    
+    // Get transform component and modify it
+    TransformComponent* transform = skullActor->GetComponent<TransformComponent>();
+    if (transform) {
+        std::cout << "Initial position: " << transform->GetPosition().x << ", " 
+                  << transform->GetPosition().y << ", " << transform->GetPosition().z << std::endl;
+        
+        // Keep skull at original position
+        // transform->SetPosition(glm::vec3(0.0f, 0.1f, 0.0f));
+        
+        std::cout << "New position: " << transform->GetPosition().x << ", " 
+                  << transform->GetPosition().y << ", " << transform->GetPosition().z << std::endl;
+    }
+    
+    // Second skull stays at its initial position
+    // TransformComponent* transform2 = skullActor2->GetComponent<TransformComponent>();
+    // if (transform2) {
+    //     transform2->SetPosition(glm::vec3(0.5f, 0.1f, 0.0f));  // Same Y offset as first skull
+    // }
+    
+    // Get mesh component
+    MeshComponent* meshComp = skullActor->GetComponent<MeshComponent>();
+    if (meshComp) {
+        std::cout << "Mesh component has " << meshComp->GetMeshes().size() << " meshes" << std::endl;
+    }
+    
+    std::cout << "=== Component System Demo Complete ===\n" << std::endl;
+
+    // Create camera actor
+    Actor* cameraActor = new Actor();
+    cameraActor->AddComponent<CameraComponent>(cameraActor, 45.0f, 16.0f/9.0f, 0.1f, 1000.0f);
+    if (!cameraActor->OnCreate()) {
+        std::cerr << "Failed to create camera actor" << std::endl;
+        return -1;
+    }
+    
+    // Get camera component
+    CameraComponent* camera = cameraActor->GetComponent<CameraComponent>();
+    if (camera) {
+        camera->SetLookAt(
+            glm::vec3(0.0f, 0.0f, 3.0f),  // Eye position
+            glm::vec3(0.0f, 0.0f, 0.0f),  // Look at center
+            glm::vec3(0.0f, 1.0f, 0.0f)   // Up vector
+        );
+        std::cout << "Camera created at position: " << camera->GetPosition().x << ", " 
+                  << camera->GetPosition().y << ", " << camera->GetPosition().z << std::endl;
+        
+        // Test: Force camera to move after 3 seconds
+        std::cout << "Camera will auto-move in 3 seconds for testing..." << std::endl;
+    } else {
+        std::cout << "ERROR: Failed to get camera component!" << std::endl;
+    }
+
+    // Get meshes from the component system
+    if (!meshComp) {
+        std::cerr << "No mesh component found!" << std::endl;
+        return -1;
+    }
+    const std::vector<MeshBuffers>& meshes = meshComp->GetMeshes();
 
     // Create shaders with cached source
     const std::string vertSource = ReadFile("shaders/blinn_phong.vert");
@@ -262,8 +256,16 @@ int main(int argc, char *argv[]) {
     });
 
     // Main render loop
+    // Delta time tracking
+    double lastTime = glfwGetTime();
+
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
+        
+        // Calculate delta time
+        double currentTime = glfwGetTime();
+        float deltaTime = static_cast<float>(currentTime - lastTime);
+        lastTime = currentTime;
         
         int currentWidth, currentHeight;
         glfwGetFramebufferSize(window, &currentWidth, &currentHeight);
@@ -271,12 +273,43 @@ int main(int argc, char *argv[]) {
         
         const float ratio = currentWidth / (float)currentHeight;
         
-        // Simple MVP like cookbook - adjusted for better viewing
-        const glm::mat4 m = glm::rotate(glm::mat4(1.0f), glm::radians(-90.0f), glm::vec3(1, 0, 0));
-        // Move camera closer and position skull higher in the window
-        const glm::mat4 v = glm::rotate(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, -0.5f)), (float)glfwGetTime(), glm::vec3(0.0f, 1.0f, 0.0f));
-        const glm::mat4 p = glm::perspective(45.0f, ratio, 0.1f, 1000.0f);
-        const glm::mat4 mvp = p * v * m;
+        // Update camera with new aspect ratio
+        if (camera) {
+            camera->SetPerspective(45.0f, ratio, 0.1f, 1000.0f);
+            
+            // Test: Auto-move camera after 3 seconds
+            static double startTime = glfwGetTime();
+            if (glfwGetTime() - startTime > 3.0) {
+                static bool autoMoved = false;
+                if (!autoMoved) {
+                    std::cout << "Auto-moving camera for test..." << std::endl;
+                    camera->SetPosition(glm::vec3(2.0f, 1.0f, 3.0f));
+                    camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+                    autoMoved = true;
+                }
+            }
+            
+            camera->Update(deltaTime);
+            camera->HandleInput(deltaTime, window);
+            
+            // Debug: Print camera position every 60 frames (about once per second)
+            static int frameCount = 0;
+            if (++frameCount % 60 == 0) {
+                std::cout << "Camera position: " << camera->GetPosition().x << ", " 
+                          << camera->GetPosition().y << ", " << camera->GetPosition().z << std::endl;
+            }
+        } else {
+            static bool cameraNullWarning = false;
+            if (!cameraNullWarning) {
+                std::cout << "WARNING: Camera is null!" << std::endl;
+                cameraNullWarning = true;
+            }
+        }
+        
+        // Get camera matrices
+        const glm::mat4 v = camera ? camera->GetViewMatrix() : glm::mat4(1.0f);
+        const glm::mat4 p = camera ? camera->GetProjectionMatrix() : glm::perspective(45.0f, ratio, 0.1f, 1000.0f);
+        
         
         const lvk::RenderPass renderPass = {
             .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 0.2f, 0.3f, 0.4f, 1.0f } } }, // Dark greyish blue
@@ -298,18 +331,44 @@ int main(int argc, char *argv[]) {
                 cmd.cmdBindRenderPipeline(pipeline);
                 cmd.cmdBindDepthState({ .compareOp = lvk::CompareOp_Less, .isDepthWriteEnabled = true });
                 
-                // Use push constants with texture index
+                // Define push constants struct once
                 struct PushConstants {
                     glm::mat4 mvp;
+                    glm::mat4 model;
                     uint32_t textureIndex;
-                } pushConstants = { mvp, skullColor.index() };
-                cmd.cmdPushConstants(pushConstants);
+                };
                 
-                // Render all meshes
+                // Render first skull actor (no rotation)
+                const glm::mat4 m1 = skullActor->GetModelMatrix();
+                const glm::mat4 mvp1 = p * v * m1;
+                PushConstants pushConstants1 = { 
+                    mvp1, m1, skullColor.index()
+                };
+                cmd.cmdPushConstants(pushConstants1);
+                
                 for (const auto& mesh : meshes) {
                     cmd.cmdBindVertexBuffer(0, mesh.vertexBuffer);
                     cmd.cmdBindIndexBuffer(mesh.indexBuffer, lvk::IndexFormat_UI32);
                     cmd.cmdDrawIndexed(mesh.indexCount);
+                }
+                
+                // Render second skull actor
+                const glm::mat4 m2 = skullActor2->GetModelMatrix();
+                const glm::mat4 mvp2 = p * v * m2;
+                PushConstants pushConstants2 = { 
+                    mvp2, m2, skullColor.index()
+                };
+                cmd.cmdPushConstants(pushConstants2);
+                
+                // Get meshes from second actor
+                MeshComponent* meshComp2 = skullActor2->GetComponent<MeshComponent>();
+                if (meshComp2) {
+                    const std::vector<MeshBuffers>& meshes2 = meshComp2->GetMeshes();
+                    for (const auto& mesh : meshes2) {
+                        cmd.cmdBindVertexBuffer(0, mesh.vertexBuffer);
+                        cmd.cmdBindIndexBuffer(mesh.indexBuffer, lvk::IndexFormat_UI32);
+                        cmd.cmdDrawIndexed(mesh.indexCount);
+                    }
                 }
             }
             cmd.cmdEndRendering();
@@ -317,8 +376,21 @@ int main(int argc, char *argv[]) {
         ctx->submit(cmd, ctx->getCurrentSwapchainTexture());
     }
     
-    // Cleanup
-    aiReleaseImport(scene);
+    // Cleanup component system
+    if (skullActor) {
+        skullActor->OnDestroy();
+        delete skullActor;
+    }
+    
+    if (skullActor2) {
+        skullActor2->OnDestroy();
+        delete skullActor2;
+    }
+    
+    if (cameraActor) {
+        cameraActor->OnDestroy();
+        delete cameraActor;
+    }
     
     return 0;
 }

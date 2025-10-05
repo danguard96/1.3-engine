@@ -164,7 +164,7 @@ set_target_properties(VulkanEngine PROPERTIES
 
 # Compile definitions
 target_compile_definitions(VulkanEngine PRIVATE 
-    STB_IMAGE_IMPLEMENTATION
+    # STB_IMAGE_IMPLEMENTATION removed - defined in MeshComponent.cpp only
 )
 
 # Include directories
