@@ -76,12 +76,17 @@ set_property(TARGET assimp PROPERTY FOLDER "third-party")
 # Additional assimp-specific flags for FBX parser issues
 if(NOT MSVC)
     target_compile_options(assimp PRIVATE 
-        -Wno-dangling-reference 
-        -Wno-error=dangling-reference
         -Wno-unused-variable
         -Wno-unused-function
         -Wno-unused-parameter
     )
+    # Only add dangling-reference flags for GCC
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(assimp PRIVATE 
+            -Wno-dangling-reference 
+            -Wno-error=dangling-reference
+        )
+    endif()
 endif()
 
 # Handle zlib on Windows like the cookbook
@@ -100,16 +105,23 @@ if(MSVC)
 else()
     # Apply comprehensive warning suppression for assimp
     target_compile_options(assimp PRIVATE 
-        $<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference -Wno-error=dangling-reference>
         $<$<COMPILE_LANGUAGE:C>:-Wno-error -Wno-unused-variable -Wno-unused-function -Wno-unused-parameter -Wno-sign-compare>
     )
+    # Add GCC-specific C++ warnings
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        target_compile_options(assimp PRIVATE 
+            $<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference -Wno-error=dangling-reference>
+        )
+    endif()
 endif()
 
 # Add global compiler flags to suppress warnings for all targets
 if(NOT MSVC)
     add_compile_options(-Wno-unused-variable -Wno-unused-function -Wno-unused-parameter)
-    # Additional flags for dangling reference issues
-    add_compile_options(-Wno-dangling-reference -Wno-error=dangling-reference)
+    # Additional flags for dangling reference issues (GCC only)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-Wno-dangling-reference -Wno-error=dangling-reference)
+    endif()
 endif()
 
 # macOS-specific fixes
