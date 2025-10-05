@@ -89,7 +89,6 @@ if(MSVC)
 else()
     # Only apply to C++ files, not C files
     target_compile_options(assimp PRIVATE 
-        $<$<COMPILE_LANGUAGE:CXX>:-Wno-dangling-reference>
         $<$<COMPILE_LANGUAGE:C>:-Wno-error -Wno-unused-variable -Wno-unused-function -Wno-unused-parameter -Wno-sign-compare>
     )
 endif()
@@ -97,6 +96,12 @@ endif()
 # Add global compiler flags to suppress warnings for all targets
 if(NOT MSVC)
     add_compile_options(-Wno-unused-variable -Wno-unused-function -Wno-unused-parameter)
+endif()
+
+# macOS-specific fixes
+if(APPLE)
+    # Suppress additional warnings that can cause build failures
+    add_compile_options(-Wno-deprecated-non-prototype -Wno-macro-redefined)
 endif()
 
 # MinGW compatibility (working)
