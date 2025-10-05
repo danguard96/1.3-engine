@@ -12,6 +12,7 @@ layout(push_constant) uniform PushConstants {
 	mat4 mvp;
 	mat4 model;
 	uint textureIndex;
+	float _padding[3];
 } pc;
 
 // Manually define the bindless texture arrays
@@ -27,30 +28,27 @@ void main() {
 	// Sample the texture
 	vec4 texColor = textureBindless2D(pc.textureIndex, 0, fragTexCoord);
 	
-	// Brighter lighting values
-	vec3 lightPos = vec3(2.0, 2.0, 2.0);  // Top-right-back (away from camera)
-	vec3 viewPos = vec3(0.0, 0.0, 0.5);
-	vec3 lightColor = vec3(2.0, 2.0, 2.0); // Brighter light
+	// Lighting setup - these are in world space
+	vec3 lightPos = vec3(2.0, 2.0, 2.0);  // Fixed light position in world space
+	vec3 viewPos = vec3(0.0, 0.0, 3.0);    // Camera position in world space
+	vec3 lightColor = vec3(2.0, 2.0, 2.0); // Bright light
 	float shininess = 64.0;
 	
-	// Transform normal to world space using the model matrix
-	mat3 normalMatrix = mat3(transpose(inverse(mat3(pc.model))));
-	vec3 norm = normalize(normalMatrix * fragNormal);
+	// Use world space fragment position and normal (already transformed in vertex shader)
+	vec3 norm = normalize(fragNormal);
+	vec3 worldPos = fragPos;
 	
-	// Transform fragment position to world space
-	vec3 worldPos = (pc.model * vec4(fragPos, 1.0)).xyz;
-	
-	// Calculate light direction
+	// Calculate light direction from world space
 	vec3 lightDir = normalize(lightPos - worldPos);
 	
-	// Calculate view direction
+	// Calculate view direction from world space
 	vec3 viewDir = normalize(viewPos - worldPos);
 	
 	// Calculate halfway vector for Blinn-Phong
 	vec3 halfwayDir = normalize(lightDir + viewDir);
 	
-	// Brighter ambient lighting
-	float ambientStrength = 0.3; // Increased from 0.1
+	// Ambient lighting
+	float ambientStrength = 0.3;
 	vec3 ambient = ambientStrength * lightColor;
 	
 	// Diffuse lighting
@@ -61,7 +59,7 @@ void main() {
 	float spec = pow(max(dot(norm, halfwayDir), 0.0), shininess);
 	vec3 specular = spec * lightColor;
 	
-	// Combine all lighting components with brighter result
+	// Combine all lighting components
 	vec3 lighting = ambient + diffuse + specular;
 	vec3 result = lighting * texColor.rgb;
 	

@@ -24,6 +24,11 @@
 #include <components/MeshComponent.h>
 #include <components/CameraComponent.h>
 
+// ImGui includes
+#include <imgui.h>
+#include <lvk/HelpersImGui.h>
+#include <float.h> // For FLT_MAX
+
 std::string ReadFile(const std::filesystem::path& shader_path) {
     if (!std::filesystem::exists(shader_path) || !std::filesystem::is_regular_file(shader_path)) {
         return {};
@@ -84,9 +89,33 @@ int main(int argc, char *argv[]) {
     int height{600};
     GLFWwindow *window = lvk::initWindow("VKEngine", width, height, false);
     
-    // Enable cursor capture for mouse look
-    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    // Disable mouse camera movement - use ImGui overlay instead
+    bool cursorCaptured = false;
+    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     std::unique_ptr<lvk::IContext> ctx = lvk::createVulkanContextWithSwapchain(window, width, height, {});
+    
+    // Initialize ImGui exactly like the cookbook
+    std::unique_ptr<lvk::ImGuiRenderer> imgui = std::make_unique<lvk::ImGuiRenderer>(*ctx);
+    
+    // GLFW input callbacks exactly like the cookbook
+    glfwSetCursorPosCallback(window, [](auto* window, double x, double y) { 
+        ImGui::GetIO().MousePos = ImVec2(x, y); 
+    });
+    glfwSetMouseButtonCallback(window, [](auto* window, int button, int action, int mods) {
+        double xpos, ypos;
+        glfwGetCursorPos(window, &xpos, &ypos);
+        const ImGuiMouseButton_ imguiButton = (button == GLFW_MOUSE_BUTTON_LEFT)
+                                                  ? ImGuiMouseButton_Left
+                                                  : (button == GLFW_MOUSE_BUTTON_RIGHT ? ImGuiMouseButton_Right : ImGuiMouseButton_Middle);
+        ImGuiIO& io = ImGui::GetIO();
+        io.MousePos = ImVec2((float)xpos, (float)ypos);
+        io.MouseDown[imguiButton] = action == GLFW_PRESS;
+    });
+    glfwSetKeyCallback(window, [](auto* window, int key, int scancode, int action, int mods) {
+        if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+            glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+    });
     
     // Simple setup like cookbook
     
@@ -97,6 +126,11 @@ int main(int argc, char *argv[]) {
     
     // Load texture for rendering
     auto skullColor = LoadTexture(ctx.get(), "assets/skull/textures/skullColor.png");
+    if (!skullColor.valid()) {
+        std::cerr << "ERROR: Failed to load skull texture!" << std::endl;
+        return -1;
+    }
+    std::cout << "Skull texture loaded successfully, index: " << skullColor.index() << std::endl;
     
     // Component System Example
     std::cout << "\n=== Component System Demo ===" << std::endl;
@@ -273,6 +307,8 @@ int main(int argc, char *argv[]) {
         
         const float ratio = currentWidth / (float)currentHeight;
         
+        // ImGui frame will be started after framebuffer is created
+        
         // Update camera with new aspect ratio
         if (camera) {
             camera->SetPerspective(45.0f, ratio, 0.1f, 1000.0f);
@@ -290,7 +326,9 @@ int main(int argc, char *argv[]) {
             }
             
             camera->Update(deltaTime);
-            camera->HandleInput(deltaTime, window);
+            // Camera input disabled - using ImGui overlay for controls
+            
+            // ImGui input state managed by GLFW callbacks (like cookbook)
             
             // Debug: Print camera position every 60 frames (about once per second)
             static int frameCount = 0;
@@ -305,6 +343,8 @@ int main(int argc, char *argv[]) {
                 cameraNullWarning = true;
             }
         }
+        
+        // ImGui UI will be rendered after beginFrame() is called
         
         // Get camera matrices
         const glm::mat4 v = camera ? camera->GetViewMatrix() : glm::mat4(1.0f);
@@ -327,22 +367,114 @@ int main(int argc, char *argv[]) {
             cmd.cmdBeginRendering(renderPass, framebuffer, { 
                 .textures = { skullColor }
             });
+            // Rendering with texture index: " << skullColor.index()
+            
+            // ImGui exactly like the cookbook - INSIDE command buffer after cmdBeginRendering
+            imgui->beginFrame(framebuffer);
+            
+            // Actor Controls Overlay
+            ImGui::Begin("Actor Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+            
+            // Skull 1 Controls
+            ImGui::Text("Skull 1:");
+            TransformComponent* transform1 = skullActor->GetComponent<TransformComponent>();
+            if (transform1) {
+                glm::vec3 pos1 = transform1->GetPosition();
+                glm::vec3 scale1 = transform1->GetScale();
+                glm::quat rot1 = transform1->GetQuaternion();
+                
+                // Convert quaternion to Euler angles for display
+                glm::vec3 euler1 = glm::eulerAngles(rot1);
+                euler1 = glm::degrees(euler1); // Convert to degrees
+                
+                if (ImGui::DragFloat3("Position 1", &pos1.x, 0.1f)) {
+                    transform1->SetPosition(pos1);
+                }
+                if (ImGui::DragFloat3("Scale 1", &scale1.x, 0.1f)) {
+                    transform1->SetScale(scale1);
+                }
+                if (ImGui::DragFloat3("Rotation 1", &euler1.x, 1.0f)) {
+                    transform1->SetRotation(glm::quat(glm::radians(euler1)));
+                }
+            }
+            
+            ImGui::Separator();
+            
+            // Skull 2 Controls
+            ImGui::Text("Skull 2:");
+            TransformComponent* transform2 = skullActor2->GetComponent<TransformComponent>();
+            if (transform2) {
+                glm::vec3 pos2 = transform2->GetPosition();
+                glm::vec3 scale2 = transform2->GetScale();
+                glm::quat rot2 = transform2->GetQuaternion();
+                
+                // Convert quaternion to Euler angles for display
+                glm::vec3 euler2 = glm::eulerAngles(rot2);
+                euler2 = glm::degrees(euler2); // Convert to degrees
+                
+                if (ImGui::DragFloat3("Position 2", &pos2.x, 0.1f)) {
+                    transform2->SetPosition(pos2);
+                }
+                if (ImGui::DragFloat3("Scale 2", &scale2.x, 0.1f)) {
+                    transform2->SetScale(scale2);
+                }
+                if (ImGui::DragFloat3("Rotation 2", &euler2.x, 1.0f)) {
+                    transform2->SetRotation(glm::quat(glm::radians(euler2)));
+                }
+            }
+            
+            ImGui::Separator();
+            
+            // Camera Controls
+            ImGui::Text("Camera:");
+            if (camera) {
+                glm::vec3 camPos = camera->GetPosition();
+                if (ImGui::DragFloat3("Camera Position", &camPos.x, 0.1f)) {
+                    camera->SetPosition(camPos);
+                }
+                
+                // Camera movement buttons
+                if (ImGui::Button("Move Forward")) {
+                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
+                    camera->SetPosition(camera->GetPosition() + forward * 0.5f);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Move Back")) {
+                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
+                    camera->SetPosition(camera->GetPosition() - forward * 0.5f);
+                }
+                if (ImGui::Button("Move Left")) {
+                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
+                    glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
+                    camera->SetPosition(camera->GetPosition() - right * 0.5f);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Move Right")) {
+                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
+                    glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
+                    camera->SetPosition(camera->GetPosition() + right * 0.5f);
+                }
+            }
+            
+            ImGui::End();
+            // ImGui UI created successfully
             {
                 cmd.cmdBindRenderPipeline(pipeline);
                 cmd.cmdBindDepthState({ .compareOp = lvk::CompareOp_Less, .isDepthWriteEnabled = true });
                 
-                // Define push constants struct once
+                // TEMPORARY: Use minimal push constants to isolate the issue
                 struct PushConstants {
                     glm::mat4 mvp;
                     glm::mat4 model;
                     uint32_t textureIndex;
+                    float _padding[3]; // Ensure 16-byte alignment
                 };
                 
-                // Render first skull actor (no rotation)
+                // Render first skull actor
                 const glm::mat4 m1 = skullActor->GetModelMatrix();
                 const glm::mat4 mvp1 = p * v * m1;
                 PushConstants pushConstants1 = { 
-                    mvp1, m1, skullColor.index()
+                    mvp1, m1, skullColor.index(), {0.0f, 0.0f, 0.0f}
                 };
                 cmd.cmdPushConstants(pushConstants1);
                 
@@ -356,7 +488,7 @@ int main(int argc, char *argv[]) {
                 const glm::mat4 m2 = skullActor2->GetModelMatrix();
                 const glm::mat4 mvp2 = p * v * m2;
                 PushConstants pushConstants2 = { 
-                    mvp2, m2, skullColor.index()
+                    mvp2, m2, skullColor.index(), {0.0f, 0.0f, 0.0f}
                 };
                 cmd.cmdPushConstants(pushConstants2);
                 
@@ -371,8 +503,13 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
+            
+            // ImGui rendering exactly like the cookbook - INSIDE command buffer
+            imgui->endFrame(cmd);
+            
             cmd.cmdEndRendering();
         }
+        
         ctx->submit(cmd, ctx->getCurrentSwapchainTexture());
     }
     

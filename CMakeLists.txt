@@ -14,6 +14,9 @@ find_package(Vulkan REQUIRED)
 # Include directories for bootstrapped dependencies
 include_directories(deps deps/src external)
 
+# Add ImGui include directory
+include_directories(deps/src/lightweightvk/third-party/deps/src/imgui)
+
 # Add subdirectories for bootstrapped libraries
 add_subdirectory(deps/src/glm)
 
@@ -24,6 +27,9 @@ include_directories(${LIGHTWEIGHTVK_SOURCE_DIR}/include)
 # Disable Tracy to avoid build issues
 set(LVK_WITH_TRACY OFF CACHE BOOL "Disable Tracy profiler")
 set(LVK_WITH_TRACY_GPU OFF CACHE BOOL "Disable Tracy GPU profiler")
+
+# Enable ImGui support
+set(LVK_WITH_IMGUI ON CACHE BOOL "Enable ImGui support")
 
 # Configure ktx like the cookbook
 set(KTX_FEATURE_DOC            OFF CACHE BOOL "")
