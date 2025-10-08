@@ -85,8 +85,8 @@ struct Vertex {
 
 int main(int argc, char *argv[]) {
     glfwInit();
-    int width{800};
-    int height{600};
+    int width{1920};
+    int height{1080};
     GLFWwindow *window = lvk::initWindow("VKEngine", width, height, false);
     
     // Disable mouse camera movement - use ImGui overlay instead
@@ -239,7 +239,7 @@ int main(int argc, char *argv[]) {
     }
     const std::vector<MeshBuffers>& meshes = meshComp->GetMeshes();
 
-    // Create shaders with cached source
+    // Create main rendering shaders
     const std::string vertSource = ReadFile("shaders/blinn_phong.vert");
     const std::string fragSource = ReadFile("shaders/blinn_phong.frag");
     
@@ -247,6 +247,32 @@ int main(int argc, char *argv[]) {
         lvk::ShaderModuleDesc{vertSource.c_str(), lvk::Stage_Vert, "vert shader"}, nullptr);
     const lvk::Holder<lvk::ShaderModuleHandle> frag = ctx->createShaderModule(
         lvk::ShaderModuleDesc{fragSource.c_str(), lvk::Stage_Frag, "frag shader"}, nullptr);
+    
+    // Load post-processing shaders
+    const std::string postVertSource = ReadFile("shaders/post.vert");
+    const lvk::Holder<lvk::ShaderModuleHandle> postVert = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{postVertSource.c_str(), lvk::Stage_Vert, "post vert shader"}, nullptr);
+    
+    // Load all post-processing fragment shaders
+    const std::string nopostFragSource = ReadFile("shaders/nopost.frag");
+    const std::string crtFragSource = ReadFile("shaders/CRT-dynamic.frag");
+    const std::string bloomFragSource = ReadFile("shaders/bloom.frag");
+    const std::string dreamFragSource = ReadFile("shaders/dream.frag");
+    const std::string glitchFragSource = ReadFile("shaders/glitch.frag");
+    const std::string pixelFragSource = ReadFile("shaders/pixelation.frag");
+    
+    const lvk::Holder<lvk::ShaderModuleHandle> nopostFrag = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{nopostFragSource.c_str(), lvk::Stage_Frag, "nopost frag shader"}, nullptr);
+    const lvk::Holder<lvk::ShaderModuleHandle> crtFrag = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{crtFragSource.c_str(), lvk::Stage_Frag, "crt frag shader"}, nullptr);
+    const lvk::Holder<lvk::ShaderModuleHandle> bloomFrag = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{bloomFragSource.c_str(), lvk::Stage_Frag, "bloom frag shader"}, nullptr);
+    const lvk::Holder<lvk::ShaderModuleHandle> dreamFrag = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{dreamFragSource.c_str(), lvk::Stage_Frag, "dream frag shader"}, nullptr);
+    const lvk::Holder<lvk::ShaderModuleHandle> glitchFrag = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{glitchFragSource.c_str(), lvk::Stage_Frag, "glitch frag shader"}, nullptr);
+    const lvk::Holder<lvk::ShaderModuleHandle> pixelFrag = ctx->createShaderModule(
+        lvk::ShaderModuleDesc{pixelFragSource.c_str(), lvk::Stage_Frag, "pixel frag shader"}, nullptr);
     
     // Create pipeline with texture support
     const lvk::VertexInput vdesc = {
@@ -265,17 +291,68 @@ int main(int argc, char *argv[]) {
         .color       = { { .format = ctx->getSwapchainFormat() } },
         .depthFormat = lvk::Format_Z_F32,
         .cullMode    = lvk::CullMode_Back,
+        .debugName   = "Main Pipeline",
     });
     
-    // Create sampler for textures
+    // Create post-processing pipelines following cookbook pattern
+    lvk::Holder<lvk::RenderPipelineHandle> pipelineToneMap = ctx->createRenderPipeline({
+        .smVert = postVert,
+        .smFrag = nopostFrag,
+        .color  = { { .format = ctx->getSwapchainFormat() } },
+    });
+    
+    lvk::Holder<lvk::RenderPipelineHandle> pipelineCRT = ctx->createRenderPipeline({
+        .smVert = postVert,
+        .smFrag = crtFrag,
+        .color  = { { .format = ctx->getSwapchainFormat() } },
+    });
+    
+    lvk::Holder<lvk::RenderPipelineHandle> pipelineBloom = ctx->createRenderPipeline({
+        .smVert = postVert,
+        .smFrag = bloomFrag,
+        .color  = { { .format = ctx->getSwapchainFormat() } },
+    });
+    
+    lvk::Holder<lvk::RenderPipelineHandle> pipelineDream = ctx->createRenderPipeline({
+        .smVert = postVert,
+        .smFrag = dreamFrag,
+        .color  = { { .format = ctx->getSwapchainFormat() } },
+    });
+    
+    lvk::Holder<lvk::RenderPipelineHandle> pipelineGlitch = ctx->createRenderPipeline({
+        .smVert = postVert,
+        .smFrag = glitchFrag,
+        .color  = { { .format = ctx->getSwapchainFormat() } },
+    });
+    
+    lvk::Holder<lvk::RenderPipelineHandle> pipelinePixel = ctx->createRenderPipeline({
+        .smVert = postVert,
+        .smFrag = pixelFrag,
+        .color  = { { .format = ctx->getSwapchainFormat() } },
+    });
+    
+    // Create intermediate framebuffer for post-processing (following cookbook pattern)
+    const lvk::Dimensions sizeFb = ctx->getDimensions(ctx->getCurrentSwapchainTexture());
+    
+    lvk::Holder<lvk::TextureHandle> intermediateTexture = ctx->createTexture({
+        .format     = ctx->getSwapchainFormat(),
+        .dimensions = sizeFb,
+        .usage      = lvk::TextureUsageBits_Attachment | lvk::TextureUsageBits_Sampled,
+        .debugName  = "Intermediate Texture",
+    });
+    
+    lvk::Holder<lvk::TextureHandle> intermediateDepth = ctx->createTexture({
+        .format     = lvk::Format_Z_F32,
+        .dimensions = sizeFb,
+        .usage      = lvk::TextureUsageBits_Attachment,
+        .debugName  = "Intermediate Depth",
+    });
+    
+    // Create sampler for textures (following cookbook pattern)
     lvk::Holder<lvk::SamplerHandle> sampler = ctx->createSampler({
-        .minFilter = lvk::SamplerFilter::SamplerFilter_Linear,
-        .magFilter = lvk::SamplerFilter::SamplerFilter_Linear,
-        .mipMap    = lvk::SamplerMip::SamplerMip_Linear,
-        .wrapU     = lvk::SamplerWrap::SamplerWrap_Repeat,
-        .wrapV     = lvk::SamplerWrap::SamplerWrap_Repeat,
-        .wrapW     = lvk::SamplerWrap::SamplerWrap_Repeat,
-        .debugName = "Texture Sampler",
+        .wrapU = lvk::SamplerWrap_Clamp,
+        .wrapV = lvk::SamplerWrap_Clamp,
+        .wrapW = lvk::SamplerWrap_Clamp,
     });
 
     // We'll use simple push constants for now
@@ -351,118 +428,30 @@ int main(int argc, char *argv[]) {
         const glm::mat4 p = camera ? camera->GetProjectionMatrix() : glm::perspective(45.0f, ratio, 0.1f, 1000.0f);
         
         
-        const lvk::RenderPass renderPass = {
-            .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 0.2f, 0.3f, 0.4f, 1.0f } } }, // Dark greyish blue
-            .depth = { .loadOp = lvk::LoadOp_Clear, .clearDepth = 1.0f }
-        };
-        
-        const lvk::Framebuffer framebuffer = {
-            .color        = { { .texture = ctx->getCurrentSwapchainTexture() } },
-            .depthStencil = { .texture = depthTexture },
-        };
+        // Post-processing effect selection
+        static int currentEffect = 0; // 0 = no post, 1 = CRT, 2 = Bloom, 3 = Dream, 4 = Glitch, 5 = Pixelation
         
         lvk::ICommandBuffer& cmd = ctx->acquireCommandBuffer();
         {
-            // Pass texture as dependency so LightweightVK can bind it to descriptor sets
-            cmd.cmdBeginRendering(renderPass, framebuffer, { 
+            // PASS 1: Render main scene to intermediate framebuffer
+            const lvk::RenderPass renderPassOffscreen = {
+                .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 0.2f, 0.3f, 0.4f, 1.0f } } },
+                .depth = { .loadOp = lvk::LoadOp_Clear, .clearDepth = 1.0f }
+            };
+            
+            const lvk::Framebuffer framebufferOffscreen = {
+                .color        = { { .texture = intermediateTexture } },
+                .depthStencil = { .texture = intermediateDepth },
+            };
+            
+            cmd.cmdBeginRendering(renderPassOffscreen, framebufferOffscreen, { 
                 .textures = { skullColor }
             });
-            // Rendering with texture index: " << skullColor.index()
             
-            // ImGui exactly like the cookbook - INSIDE command buffer after cmdBeginRendering
-            imgui->beginFrame(framebuffer);
-            
-            // Actor Controls Overlay
-            ImGui::Begin("Actor Controls", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-            
-            // Skull 1 Controls
-            ImGui::Text("Skull 1:");
-            TransformComponent* transform1 = skullActor->GetComponent<TransformComponent>();
-            if (transform1) {
-                glm::vec3 pos1 = transform1->GetPosition();
-                glm::vec3 scale1 = transform1->GetScale();
-                glm::quat rot1 = transform1->GetQuaternion();
-                
-                // Convert quaternion to Euler angles for display
-                glm::vec3 euler1 = glm::eulerAngles(rot1);
-                euler1 = glm::degrees(euler1); // Convert to degrees
-                
-                if (ImGui::DragFloat3("Position 1", &pos1.x, 0.1f)) {
-                    transform1->SetPosition(pos1);
-                }
-                if (ImGui::DragFloat3("Scale 1", &scale1.x, 0.1f)) {
-                    transform1->SetScale(scale1);
-                }
-                if (ImGui::DragFloat3("Rotation 1", &euler1.x, 1.0f)) {
-                    transform1->SetRotation(glm::quat(glm::radians(euler1)));
-                }
-            }
-            
-            ImGui::Separator();
-            
-            // Skull 2 Controls
-            ImGui::Text("Skull 2:");
-            TransformComponent* transform2 = skullActor2->GetComponent<TransformComponent>();
-            if (transform2) {
-                glm::vec3 pos2 = transform2->GetPosition();
-                glm::vec3 scale2 = transform2->GetScale();
-                glm::quat rot2 = transform2->GetQuaternion();
-                
-                // Convert quaternion to Euler angles for display
-                glm::vec3 euler2 = glm::eulerAngles(rot2);
-                euler2 = glm::degrees(euler2); // Convert to degrees
-                
-                if (ImGui::DragFloat3("Position 2", &pos2.x, 0.1f)) {
-                    transform2->SetPosition(pos2);
-                }
-                if (ImGui::DragFloat3("Scale 2", &scale2.x, 0.1f)) {
-                    transform2->SetScale(scale2);
-                }
-                if (ImGui::DragFloat3("Rotation 2", &euler2.x, 1.0f)) {
-                    transform2->SetRotation(glm::quat(glm::radians(euler2)));
-                }
-            }
-            
-            ImGui::Separator();
-            
-            // Camera Controls
-            ImGui::Text("Camera:");
-            if (camera) {
-                glm::vec3 camPos = camera->GetPosition();
-                if (ImGui::DragFloat3("Camera Position", &camPos.x, 0.1f)) {
-                    camera->SetPosition(camPos);
-                }
-                
-                // Camera movement buttons
-                if (ImGui::Button("Move Forward")) {
-                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
-                    camera->SetPosition(camera->GetPosition() + forward * 0.5f);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Move Back")) {
-                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
-                    camera->SetPosition(camera->GetPosition() - forward * 0.5f);
-                }
-                if (ImGui::Button("Move Left")) {
-                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
-                    glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
-                    camera->SetPosition(camera->GetPosition() - right * 0.5f);
-                }
-                ImGui::SameLine();
-                if (ImGui::Button("Move Right")) {
-                    glm::vec3 forward = glm::normalize(camera->GetTarget() - camera->GetPosition());
-                    glm::vec3 right = glm::normalize(glm::cross(forward, glm::vec3(0, 1, 0)));
-                    camera->SetPosition(camera->GetPosition() + right * 0.5f);
-                }
-            }
-            
-            ImGui::End();
-            // ImGui UI created successfully
             {
                 cmd.cmdBindRenderPipeline(pipeline);
                 cmd.cmdBindDepthState({ .compareOp = lvk::CompareOp_Less, .isDepthWriteEnabled = true });
                 
-                // TEMPORARY: Use minimal push constants to isolate the issue
                 struct PushConstants {
                     glm::mat4 mvp;
                     glm::mat4 model;
@@ -504,7 +493,69 @@ int main(int argc, char *argv[]) {
                 }
             }
             
-            // ImGui rendering exactly like the cookbook - INSIDE command buffer
+            cmd.cmdEndRendering();
+            
+            // PASS 2: Apply post-processing effects to final framebuffer
+            const lvk::RenderPass renderPassMain = {
+                .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 1.0f, 1.0f, 1.0f, 1.0f } } },
+            };
+            
+            const lvk::Framebuffer framebufferMain = {
+                .color = { { .texture = ctx->getCurrentSwapchainTexture() } },
+            };
+            
+            cmd.cmdBeginRendering(renderPassMain, framebufferMain, { 
+                .textures = { lvk::TextureHandle(intermediateTexture) }
+            });
+            
+            // Select post-processing pipeline based on current effect
+            lvk::Holder<lvk::RenderPipelineHandle>* selectedPipeline;
+            switch (currentEffect) {
+                case 0: selectedPipeline = &pipelineToneMap; break;
+                case 1: selectedPipeline = &pipelineCRT; break;
+                case 2: selectedPipeline = &pipelineBloom; break;
+                case 3: selectedPipeline = &pipelineDream; break;
+                case 4: selectedPipeline = &pipelineGlitch; break;
+                case 5: selectedPipeline = &pipelinePixel; break;
+                default: selectedPipeline = &pipelineToneMap; break;
+            }
+            
+            cmd.cmdBindRenderPipeline(*selectedPipeline);
+            cmd.cmdBindDepthState({});
+            
+            // Push constants for post-processing
+            struct PostPushConstants {
+                uint32_t texColor;
+                uint32_t smpl;
+                float time;
+                float _padding; // Ensure 16-byte alignment
+            };
+            
+            PostPushConstants postPush = { 
+                intermediateTexture.index(), 
+                sampler.index(), 
+                static_cast<float>(currentTime),
+                0.0f
+            };
+            cmd.cmdPushConstants(postPush);
+            
+            // Render fullscreen triangle (following cookbook pattern)
+            cmd.cmdDraw(3);
+            
+            // Render ImGui on top
+            imgui->beginFrame(framebufferMain);
+            
+            // Post-processing control overlay
+            ImGui::Begin("Post-Processing Effects", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+            ImGui::Text("Select Post-Processing Effect:");
+            if (ImGui::Button("No Post-Processing")) currentEffect = 0;
+            if (ImGui::Button("CRT Dynamic")) currentEffect = 1;
+            if (ImGui::Button("Bloom")) currentEffect = 2;
+            if (ImGui::Button("Dream")) currentEffect = 3;
+            if (ImGui::Button("Glitch")) currentEffect = 4;
+            if (ImGui::Button("Pixelation")) currentEffect = 5;
+            ImGui::End();
+            
             imgui->endFrame(cmd);
             
             cmd.cmdEndRendering();
