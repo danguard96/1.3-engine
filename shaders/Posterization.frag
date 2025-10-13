@@ -15,33 +15,27 @@ layout(push_constant) uniform PushConstants {
 layout (set = 0, binding = 0) uniform texture2D kTextures2D[];
 layout (set = 0, binding = 1) uniform sampler kSamplers[];
 
+bool perpixel = false;
+
 vec4 textureBindless2D(uint textureid, uint samplerid, vec2 uv) {
   return texture(nonuniformEXT(sampler2D(kTextures2D[textureid], kSamplers[samplerid])), uv);
 }
 
-// 8x8 dithering matrix - initialized with zeros
-float[8][8] dither_pattern = {
-    {0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0},
-    {1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0},
-    {0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0},
-    {1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0},
-    {1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0},
-    {0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0},
-    {1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0},
-    {0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0}
-};
+vec4[] colors = {vec4(0.035,0.043,0.043, 1), vec4(0.271,0.373,0.337,1), vec4(0.4,0.639,0.451,1), vec4(0.773,0.929,0.675,1),
+vec4(0.859,0.996,0.722,1)};
 
 void main() {
-    vec2 new_uv = vec2(uv.x, uv.y < 0.5 ? 1-uv.y : uv.y);
-    vec4 color = textureBindless2D(pc.texColor, pc.smpl, new_uv);
+    vec4 color = textureBindless2D(pc.texColor, pc.smpl, uv);
 
-    int kernel_size = 8;
-    int pixel_size = 2;
-
-    int x = int(mod((gl_FragCoord.x/pixel_size), kernel_size));
-    int y = int(mod((gl_FragCoord.y/pixel_size), kernel_size));
-
-    color = mix(vec4(0.0), color, dither_pattern[x][y]);
+    if(perpixel == true){
+        color.x = floor((color.x+0.5) * 2)/2;
+        color.y = floor((color.y+0.5) * 2)/2;
+        color.z = floor((color.z+0.5) * 2)/2;
+    }
+    else {
+        int index = int(floor((((color.x+color.y+color.z)/3)+0.5)*5));
+        color = colors[index];
+    }
 
     out_FragColor = color;
 }
