@@ -5,11 +5,10 @@
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 out_FragColor;
 
-// Real time uniform
 layout(push_constant) uniform PushConstants {
     uint texColor;
     uint smpl;
-    float time;  // Real time in seconds
+    float time;
 } pc;
 
 // Manually define the bindless texture arrays
@@ -18,27 +17,18 @@ layout (set = 0, binding = 1) uniform sampler kSamplers[];
 
 // Manually define the textureBindless2D function
 vec4 textureBindless2D(uint textureid, uint samplerid, vec2 uv) {
-  return texture(nonuniformEXT(sampler2D(kTextures2D[textureid], kSamplers[samplerid])), uv);
+    return texture(nonuniformEXT(sampler2D(kTextures2D[textureid], kSamplers[samplerid])), uv);
 }
 
-vec4[] colors = {vec4(1, 0, 0, 0.75), vec4(0, 1, 0, 0.75), vec4(0, 0, 1, 0.75), vec4(0, 0, 0, 0.5)};
-float[] factors = {0.97,0.97,0.97,0.85};
+vec4 waterColor = vec4(0.0, 0.56, 0.88, 1.0);
+float waterIntensity = 0.2;
 
 void main() {
-    float x = floor(gl_FragCoord.x / 3);
-    float y = floor(gl_FragCoord.y / 4);
-
     vec2 mod_uv = uv;
-    mod_uv.x = uv.x + sin(gl_FragCoord.y + pc.time) * 0.0006;
+    mod_uv.y = mod_uv.y + sin(((2 * pc.time) + (gl_FragCoord.x / 8))) * 0.002;
 
     vec4 color = textureBindless2D(pc.texColor, pc.smpl, mod_uv);
 
-    color = mix(color * 1.5, color, 1 - (1 / (mod(gl_FragCoord.y * x - (pc.time * 2),256))));
-
-    int i = int(mod(x,4));
-    color = mix(colors[i], color, factors[i]);
-
-    color = mix(color * 0.1, color, abs(sin(y + pc.time)));
-
+    color = mix(color, waterColor, waterIntensity);
     out_FragColor = color;
 }

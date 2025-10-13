@@ -32,8 +32,7 @@ float[8][8] dither_pattern = {
 };
 
 void main() {
-    vec2 new_uv = vec2(uv.x, uv.y < 0.5 ? 1-uv.y : uv.y);
-    vec4 color = textureBindless2D(pc.texColor, pc.smpl, new_uv);
+    vec4 color = textureBindless2D(pc.texColor, pc.smpl, uv);
 
     int kernel_size = 8;
     int pixel_size = 2;
