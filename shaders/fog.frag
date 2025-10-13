@@ -13,35 +13,28 @@ layout(push_constant) uniform PushConstants {
     uint noise2;
 } pc;
 
-// Manually define the bindless texture arrays
 layout (set = 0, binding = 0) uniform texture2D kTextures2D[];
 layout (set = 0, binding = 1) uniform sampler kSamplers[];
 
-// Manually define the textureBindless2D function
 vec4 textureBindless2D(uint textureid, uint samplerid, vec2 uv) {
     return texture(nonuniformEXT(sampler2D(kTextures2D[textureid], kSamplers[samplerid])), uv);
 }
 
 vec4 fogColor = vec4(1.0);
-float noiseScale = 0.5; // How many times the noise texture repeats across screen
-float noiseScale2 = 1.0; // How many times the noise texture repeats across screen
-float noiseSpeed = 0.24; // Speed of noise animation
-float noiseSpeed2 = 0.06; // Speed of noise animation
+float noiseScale = 0.5;
+float noiseScale2 = 1.0;
+float noiseSpeed = 0.24;
+float noiseSpeed2 = 0.06;
 
 void main() {
-    // Sample the main scene color
     vec4 color = textureBindless2D(pc.texColor, pc.smpl, uv);
     
-    // Create animated UV coordinates for noise sampling
     vec2 noiseUV = mod(uv * noiseScale + vec2(pc.time * noiseSpeed, pc.time * noiseSpeed * 0.7), 1);
     vec2 noiseUV2 = mod(uv * noiseScale2 + vec2(pc.time * noiseSpeed2, pc.time * noiseSpeed2 * 0.7), 1);
 
-    // Sample the Gabor noise texture
     float noise = textureBindless2D(pc.noise, pc.smpl, noiseUV).r;
     float noise2 = textureBindless2D(pc.noise2, pc.smpl, noiseUV2).r;
-    //float finalNoise = (noise + noise2) / 2;
 
-    // Apply fog with noise variation
     vec4 color1 = mix(color, fogColor, noise > noise2 ? 1 - (1.5 * noise) : (1 - (1.5 * noise)) / 2);
     vec4 color2 = mix(color, fogColor, noise2 > noise ? 1 - noise2 : noise2);
 
