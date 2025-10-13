@@ -9,14 +9,12 @@
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
 #include <assimp/cimport.h>
-#include <assimp/version.h>
 #include <stb_image.h>
 #include <iostream>
 #include <vector>
 #include <fstream>
 #include <filesystem>
 #include <memory>
-#include <stdexcept>
 
 // Component system includes
 #include <components/Actor.h>
@@ -38,8 +36,7 @@ std::string ReadFile(const std::filesystem::path& shader_path) {
     if (!file.is_open()) {
         return {};
     }
-    
-    // Reserve space for better performance
+
     file.seekg(0, std::ios::end);
     const auto file_size = file.tellg();
     file.seekg(0, std::ios::beg);
@@ -89,8 +86,6 @@ int main(int argc, char *argv[]) {
     int height{0};
     GLFWwindow *window = lvk::initWindow("VKEngine", width, height, false);
     
-    // Disable mouse camera movement - use ImGui overlay instead
-    bool cursorCaptured = false;
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     std::unique_ptr<lvk::IContext> ctx = lvk::createVulkanContextWithSwapchain(window, width, height, {});
     
@@ -201,18 +196,9 @@ int main(int argc, char *argv[]) {
         std::cout << "Initial position: " << transform->GetPosition().x << ", " 
                   << transform->GetPosition().y << ", " << transform->GetPosition().z << std::endl;
         
-        // Keep skull at original position
-        // transform->SetPosition(glm::vec3(0.0f, 0.1f, 0.0f));
-        
         std::cout << "New position: " << transform->GetPosition().x << ", " 
                   << transform->GetPosition().y << ", " << transform->GetPosition().z << std::endl;
     }
-    
-    // Second skull stays at its initial position
-    // TransformComponent* transform2 = skullActor2->GetComponent<TransformComponent>();
-    // if (transform2) {
-    //     transform2->SetPosition(glm::vec3(0.5f, 0.1f, 0.0f));  // Same Y offset as first skull
-    // }
     
     // Get mesh component
     MeshComponent* meshComp = skullActor->GetComponent<MeshComponent>();
@@ -406,17 +392,6 @@ int main(int argc, char *argv[]) {
         .wrapW = lvk::SamplerWrap_Clamp,
     });
 
-    // We'll use simple push constants for now
-
-    // Create depth texture
-    auto depthTexture = ctx->createTexture({
-        .type = lvk::TextureType_2D,
-        .format = lvk::Format_Z_F32,
-        .dimensions = {static_cast<uint32_t>(width), static_cast<uint32_t>(height), 1},
-        .usage = lvk::TextureUsageBits_Attachment,
-        .debugName = "depth_buffer"
-    });
-
     // Main render loop
     // Delta time tracking
     double lastTime = glfwGetTime();
@@ -435,8 +410,6 @@ int main(int argc, char *argv[]) {
         
         const float ratio = currentWidth / (float)currentHeight;
         
-        // ImGui frame will be started after framebuffer is created
-        
         // Update camera with new aspect ratio
         if (camera) {
             camera->SetPerspective(45.0f, ratio, 0.1f, 1000.0f);
@@ -454,9 +427,6 @@ int main(int argc, char *argv[]) {
             }
             
             camera->Update(deltaTime);
-            // Camera input disabled - using ImGui overlay for controls
-            
-            // ImGui input state managed by GLFW callbacks (like cookbook)
             
             // Debug: Print camera position every 60 frames (about once per second)
             static int frameCount = 0;
@@ -472,19 +442,16 @@ int main(int argc, char *argv[]) {
             }
         }
         
-        // ImGui UI will be rendered after beginFrame() is called
-        
         // Get camera matrices
         const glm::mat4 v = camera ? camera->GetViewMatrix() : glm::mat4(1.0f);
         const glm::mat4 p = camera ? camera->GetProjectionMatrix() : glm::perspective(45.0f, ratio, 0.1f, 1000.0f);
         
-        
         // Post-processing effect selection
-        static int currentEffect = 0; // 0 = no post, 1 = CRT, 2 = Bloom, 3 = Dream, 4 = Glitch, 5 = Pixelation
+        static int currentEffect = 0;
         
         lvk::ICommandBuffer& cmd = ctx->acquireCommandBuffer();
         {
-            // PASS 1: Render main scene to intermediate framebuffer
+            // Render main scene to intermediate framebuffer
             const lvk::RenderPass renderPassOffscreen = {
                 .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 0.2f, 0.3f, 0.4f, 1.0f } } },
                 .depth = { .loadOp = lvk::LoadOp_Clear, .clearDepth = 1.0f }
@@ -546,7 +513,7 @@ int main(int argc, char *argv[]) {
             
             cmd.cmdEndRendering();
             
-            // PASS 2: Apply post-processing effects to final framebuffer
+            // Apply post-processing effects to final framebuffer
             const lvk::RenderPass renderPassMain = {
                 .color = { { .loadOp = lvk::LoadOp_Clear, .clearColor = { 1.0f, 1.0f, 1.0f, 1.0f } } },
             };
@@ -596,7 +563,7 @@ int main(int argc, char *argv[]) {
             };
             cmd.cmdPushConstants(postPush);
             
-            // Render fullscreen triangle (following cookbook pattern)
+            // Render fullscreen triangle
             cmd.cmdDraw(3);
             
             // Render ImGui on top
