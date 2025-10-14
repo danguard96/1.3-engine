@@ -82,8 +82,8 @@ struct Vertex {
 
 int main(int argc, char *argv[]) {
     glfwInit();
-    int width{0};
-    int height{0};
+    int width{-70};
+    int height{-70};
     GLFWwindow *window = lvk::initWindow("VKEngine", width, height, false);
     
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
@@ -220,15 +220,13 @@ int main(int argc, char *argv[]) {
     CameraComponent* camera = cameraActor->GetComponent<CameraComponent>();
     if (camera) {
         camera->SetLookAt(
-            glm::vec3(0.0f, 0.0f, 3.0f),  // Eye position
+            glm::vec3(0.0f, 0.0f, 2.0f),  // Eye position
             glm::vec3(0.0f, 0.0f, 0.0f),  // Look at center
             glm::vec3(0.0f, 1.0f, 0.0f)   // Up vector
         );
         std::cout << "Camera created at position: " << camera->GetPosition().x << ", " 
                   << camera->GetPosition().y << ", " << camera->GetPosition().z << std::endl;
         
-        // Test: Force camera to move after 3 seconds
-        std::cout << "Camera will auto-move in 3 seconds for testing..." << std::endl;
     } else {
         std::cout << "ERROR: Failed to get camera component!" << std::endl;
     }
@@ -414,17 +412,6 @@ int main(int argc, char *argv[]) {
         if (camera) {
             camera->SetPerspective(45.0f, ratio, 0.1f, 1000.0f);
             
-            // Test: Auto-move camera after 3 seconds
-            static double startTime = glfwGetTime();
-            if (glfwGetTime() - startTime > 3.0) {
-                static bool autoMoved = false;
-                if (!autoMoved) {
-                    std::cout << "Auto-moving camera for test..." << std::endl;
-                    camera->SetPosition(glm::vec3(2.0f, 1.0f, 3.0f));
-                    camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
-                    autoMoved = true;
-                }
-            }
             
             camera->Update(deltaTime);
             
